@@ -348,52 +348,21 @@ def fetch_quotes(symbols: List[str]) -> List[Dict[str, Any]]:
         return []
 
     collected: List[Dict[str, Any]] = []
+    session = requests.Session()
+    session.headers.update({"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.36"})
     remaining = [symbol.upper() for symbol in symbols]
 
     if yf is not None:
         try:
-            collected = fetch_quotes_with_yfinance(remaining)
+            collected = fetch_quotes_with_yfinance(remaining, session)
             found = {quote["symbol"] for quote in collected}
             remaining = [symbol.upper() for symbol in symbols if symbol.upper() not in found]
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("yfinance quote fetch failed: %s", exc)
-            remaining = [symbol.upper() for symbol in symbols]
+        except Exception as exc:
+            logger.error(f"yfinance quote fetch failed: {exc}")
+            raise HTTPException(status_code=502, detail="Quote service error") from exc
 
     if not remaining:
         return collected
-
-    url = "https://query1.finance.yahoo.com/v7/finance/quote"
-    params = {"symbols": ",".join(remaining)}
-    try:
-        response = requests.get(url, params=params, headers=yahoo_headers(), timeout=10)
-        response.raise_for_status()
-    except requests.RequestException as exc:
-        if settings.use_in_memory_db:
-            return collected + build_offline_quotes(remaining)
-        raise HTTPException(status_code=502, detail=f"Quote service error: {exc}") from exc
-
-    data = response.json()
-    results = data.get("quoteResponse", {}).get("result", [])
-    timestamp = now().isoformat()
-    for entry in results:
-        price = entry.get("regularMarketPrice")
-        previous_close = entry.get("regularMarketPreviousClose")
-        change = None
-        change_percent = None
-        if price is not None and previous_close not in (None, 0):
-            change = price - previous_close
-            change_percent = (change / previous_close) * 100 if previous_close else None
-        collected.append(
-            {
-                "symbol": entry.get("symbol"),
-                "price": price,
-                "change": change,
-                "changePercent": change_percent,
-                "previousClose": previous_close,
-                "currency": entry.get("currency"),
-                "updated": timestamp,
-            }
-        )
 
     if not collected and settings.use_in_memory_db:
         return build_offline_quotes(symbols)
@@ -402,73 +371,17 @@ def fetch_quotes(symbols: List[str]) -> List[Dict[str, Any]]:
 
 
 def fetch_chart(symbol: str, range_value: str = "1mo", interval: str = "1d") -> Dict[str, Any]:
+    session = requests.Session()
+    session.headers.update({"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.36"})
     if yf is not None:
         try:
-            chart = fetch_chart_with_yfinance(symbol, range_value, interval)
+            chart = fetch_chart_with_yfinance(symbol, range_value, interval, session)
             if chart["points"]:
                 return chart
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("yfinance chart fetch failed for %s: %s", symbol, exc)
-    url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}"
-    params = {
-        "range": range_value,
-        "interval": interval,
-        "includePrePost": "false",
-    }
-    try:
-        response = requests.get(url, params=params, headers=yahoo_headers(), timeout=10)
-        response.raise_for_status()
-    except requests.RequestException as exc:
-        if settings.use_in_memory_db:
-            return build_offline_chart(symbol, range_value, interval)
-        raise HTTPException(status_code=502, detail=f"Chart service error: {exc}") from exc
-    data = response.json()
-    result = (data.get("chart") or {}).get("result")
-    if not result:
-        if settings.use_in_memory_db:
-            return build_offline_chart(symbol, range_value, interval)
-        raise HTTPException(status_code=404, detail=f"No chart data for {symbol}")
-    chart = result[0]
-    timestamps = chart.get("timestamp") or []
-    indicators = chart.get("indicators") or {}
-    quote = (indicators.get("quote") or [{}])[0]
-    opens = quote.get("open") or []
-    highs = quote.get("high") or []
-    lows = quote.get("low") or []
-    closes = quote.get("close") or []
-    volumes = quote.get("volume") or []
-    points: List[Dict[str, Any]] = []
-    for index, ts in enumerate(timestamps):
-        if ts is None:
-            continue
-        close = closes[index] if index < len(closes) else None
-        open_price = opens[index] if index < len(opens) else None
-        high = highs[index] if index < len(highs) else None
-        low = lows[index] if index < len(lows) else None
-        volume = volumes[index] if index < len(volumes) else None
-        if close is None or open_price is None or high is None or low is None:
-            continue
-        iso_timestamp = datetime.fromtimestamp(ts, tz=timezone.utc).isoformat()
-        points.append(
-            {
-                "timestamp": iso_timestamp,
-                "open": float(open_price),
-                "high": float(high),
-                "low": float(low),
-                "close": float(close),
-                "volume": int(volume) if volume is not None else None,
-            }
-        )
-    meta = chart.get("meta") or {}
-    return {
-        "symbol": chart.get("meta", {}).get("symbol", symbol.upper()),
-        "points": points,
-        "timezone": meta.get("exchangeTimezoneName"),
-        "currency": meta.get("currency"),
-        "range": range_value,
-        "interval": interval,
-        "previousClose": meta.get("previousClose"),
-    }
+        except Exception as exc:
+            logger.error(f"yfinance chart fetch failed for {symbol}: {exc}")
+            raise HTTPException(status_code=502, detail="Chart service error") from exc
+    return build_offline_chart(symbol, range_value, interval)
 
 
 def search_symbols(query: str) -> List[Dict[str, Any]]:
@@ -906,13 +819,13 @@ def build_offline_search(query: str) -> List[Dict[str, Any]]:
     return matches
 
 
-def fetch_quotes_with_yfinance(symbols: List[str]) -> List[Dict[str, Any]]:
+def fetch_quotes_with_yfinance(symbols: List[str], session: requests.Session) -> List[Dict[str, Any]]:
     if yf is None:
         return []
     results: List[Dict[str, Any]] = []
     timestamp = now().isoformat()
     for symbol in symbols:
-        ticker = yf.Ticker(symbol)
+        ticker = yf.Ticker(symbol, session=session)
         info = getattr(ticker, "fast_info", {}) or {}
         price = info.get("last_price") or info.get("last_close") or info.get("previous_close")
         previous = info.get("previous_close") or price
@@ -939,10 +852,10 @@ def fetch_quotes_with_yfinance(symbols: List[str]) -> List[Dict[str, Any]]:
     return results
 
 
-def fetch_chart_with_yfinance(symbol: str, range_value: str, interval: str) -> Dict[str, Any]:
+def fetch_chart_with_yfinance(symbol: str, range_value: str, interval: str, session: requests.Session) -> Dict[str, Any]:
     if yf is None:
         return build_offline_chart(symbol, range_value, interval)
-    ticker = yf.Ticker(symbol)
+    ticker = yf.Ticker(symbol, session=session)
     history = ticker.history(period=range_value, interval=interval)
     if history.empty:
         raise ValueError("No history returned")
