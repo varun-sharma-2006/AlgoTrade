@@ -339,6 +339,10 @@ async def get_current_user(authorization: str = Header("")) -> Dict[str, Any]:
     return user | {"token": token}
 
 
+def yahoo_headers() -> Dict[str, str]:
+    return {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.36", "Accept": "application/json"}
+
+
 def fetch_quotes(symbols: List[str]) -> List[Dict[str, Any]]:
     if not symbols:
         return []
