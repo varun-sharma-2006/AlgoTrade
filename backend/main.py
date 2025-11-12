@@ -340,7 +340,7 @@ async def get_current_user(authorization: str = Header("")) -> Dict[str, Any]:
 
 
 def yahoo_headers() -> Dict[str, str]:
-    return {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.36", "Accept": "application/json"}
+    return {"User-Agent": settings.yahoo_user_agent, "Accept": "application/json"}
 
 
 def fetch_quotes(symbols: List[str]) -> List[Dict[str, Any]]:
@@ -349,7 +349,7 @@ def fetch_quotes(symbols: List[str]) -> List[Dict[str, Any]]:
 
     collected: List[Dict[str, Any]] = []
     session = requests.Session()
-    session.headers.update({"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.36"})
+    session.headers.update({"User-Agent": settings.yahoo_user_agent})
     remaining = [symbol.upper() for symbol in symbols]
 
     if yf is not None:
@@ -372,7 +372,7 @@ def fetch_quotes(symbols: List[str]) -> List[Dict[str, Any]]:
 
 def fetch_chart(symbol: str, range_value: str = "1mo", interval: str = "1d") -> Dict[str, Any]:
     session = requests.Session()
-    session.headers.update({"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.36"})
+    session.headers.update({"User-Agent": settings.yahoo_user_agent})
     if yf is not None:
         try:
             chart = fetch_chart_with_yfinance(symbol, range_value, interval, session)
