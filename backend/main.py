@@ -348,13 +348,11 @@ def fetch_quotes(symbols: List[str]) -> List[Dict[str, Any]]:
         return []
 
     collected: List[Dict[str, Any]] = []
-    session = requests.Session()
-    session.headers.update({"User-Agent": settings.yahoo_user_agent})
     remaining = [symbol.upper() for symbol in symbols]
 
     if yf is not None:
         try:
-            collected = fetch_quotes_with_yfinance(remaining, session)
+            collected = fetch_quotes_with_yfinance(remaining)
             found = {quote["symbol"] for quote in collected}
             remaining = [symbol.upper() for symbol in symbols if symbol.upper() not in found]
         except Exception as exc:
@@ -371,11 +369,9 @@ def fetch_quotes(symbols: List[str]) -> List[Dict[str, Any]]:
 
 
 def fetch_chart(symbol: str, range_value: str = "1mo", interval: str = "1d") -> Dict[str, Any]:
-    session = requests.Session()
-    session.headers.update({"User-Agent": settings.yahoo_user_agent})
     if yf is not None:
         try:
-            chart = fetch_chart_with_yfinance(symbol, range_value, interval, session)
+            chart = fetch_chart_with_yfinance(symbol, range_value, interval)
             if chart["points"]:
                 return chart
         except Exception as exc:
@@ -819,13 +815,13 @@ def build_offline_search(query: str) -> List[Dict[str, Any]]:
     return matches
 
 
-def fetch_quotes_with_yfinance(symbols: List[str], session: requests.Session) -> List[Dict[str, Any]]:
+def fetch_quotes_with_yfinance(symbols: List[str]) -> List[Dict[str, Any]]:
     if yf is None:
         return []
     results: List[Dict[str, Any]] = []
     timestamp = now().isoformat()
     for symbol in symbols:
-        ticker = yf.Ticker(symbol, session=session)
+        ticker = yf.Ticker(symbol)
         info = getattr(ticker, "fast_info", {}) or {}
         price = info.get("last_price") or info.get("last_close") or info.get("previous_close")
         previous = info.get("previous_close") or price
@@ -852,10 +848,10 @@ def fetch_quotes_with_yfinance(symbols: List[str], session: requests.Session) ->
     return results
 
 
-def fetch_chart_with_yfinance(symbol: str, range_value: str, interval: str, session: requests.Session) -> Dict[str, Any]:
+def fetch_chart_with_yfinance(symbol: str, range_value: str, interval: str) -> Dict[str, Any]:
     if yf is None:
         return build_offline_chart(symbol, range_value, interval)
-    ticker = yf.Ticker(symbol, session=session)
+    ticker = yf.Ticker(symbol)
     history = ticker.history(period=range_value, interval=interval)
     if history.empty:
         raise ValueError("No history returned")
