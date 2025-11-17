@@ -719,59 +719,23 @@ async def predict(payload: PredictionPayload, user: Dict[str, Any] = Depends(get
 @app.post("/chat")
 async def chat(payload: ChatRequest, user: Dict[str, Any] = Depends(get_current_user)) -> Dict[str, Any]:
     _ = user
-    user_id = user["id"]
-
-    async def create_simulation_tool(
-        symbol: str,
-        strategy: str,
-        starting_capital: float,
-    ) -> str:
-        """Creates a new trading simulation.
-
-        Args:
-            symbol: The stock symbol for the simulation (e.g., 'AAPL', 'GOOGL').
-            strategy: The trading strategy to use (e.g., 'sma-crossover', 'mean-reversion').
-            starting_capital: The initial capital for the simulation.
-        """
-        simulation_input = SimulationInput(
-            symbol=symbol,
-            strategy=strategy,
-            startingCapital=starting_capital,
-        )
-        new_sim = await store.add_simulation(user_id, simulation_input)
-        return f"Successfully created simulation {new_sim['id']} for {symbol} with a starting capital of {starting_capital}."
-
     if not settings.google_api_key:
         raise HTTPException(status_code=500, detail="Chatbot API key is not configured")
 
     genai.configure(api_key=settings.google_api_key)
-    model = genai.GenerativeModel(
-        model_name='gemini-pro',
-        generation_config={"tool_config": {"function_calling_config": "AUTO"}},
-        system_instruction=(
-            "You are a helpful assistant for an algorithmic trading simulator. "
-            "Your expertise is in stocks, portfolio management, and algorithmic trading strategies. "
-            "You can also create trading simulations for users. For example, 'Create a simulation for AAPL using the sma-crossover strategy with $10000.' "
-            "When providing advice, always remind the user that your insights are for educational purposes and "
-            "that they should conduct their own research before making any investment decisions as you are just an aid tool."
-        ),
-        tools=[create_simulation_tool]
-    )
+    model = genai.GenerativeModel('gemini-pro')
 
-    gemini_history = []
-    for item in payload.history:
-        gemini_history.append({
-            "role": item.role,
-            "parts": [{"text": item.content}]
-        })
-
-    chat_session = model.start_chat(
-        history=gemini_history,
-        enable_automatic_function_calling=True
+    system_prompt = (
+        "You are a helpful assistant for an algorithmic trading simulator. "
+        "Your expertise is in stocks, portfolio management, and algorithmic trading strategies. "
+        "When providing advice, always remind the user that your insights are for educational purposes and "
+        "that they should conduct their own research before making any investment decisions as you are just an aid tool."
     )
 
     try:
-        response = await chat_session.send_message_async(payload.message)
+        response = model.generate_content(
+            f"{system_prompt}\n\nUser query: {payload.message}"
+        )
         reply = response.text
     except Exception as e:
         logger.error(f"Gemini API error: {e}")
