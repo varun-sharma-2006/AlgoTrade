@@ -1,25 +1,24 @@
 # Algo Trade Simulator
 
-A full-stack trading simulation platform with live market data, personalised strategy tracking, and persistent user accounts. The project now ships with a Python (FastAPI) backend and a React frontend so you can spin up the experience locally with minimal setup.
+**Algo Trade Simulator** is a full-stack algorithmic trading platform that empowers users to backtest, simulate, and analyze quantitative trading strategies using live market data. It combines a powerful Python and FastAPI backend with a responsive React and TypeScript frontend to deliver a seamless, feature-rich experience.
 
-## Features
+At the heart of the simulator is a robust quantitative analysis engine that allows users to train and evaluate trading models based on historical data. The platform's initial machine learning capabilities are built around Simple Moving Average (SMA) crossover strategies—a cornerstone of technical analysis. Users can select a stock, define their short and long-term windows, and train the model on five years of historical data. The backend then calculates key performance metrics such as total return, annualized return, win rate, and max drawdown, providing a clear picture of the strategy's viability.
 
-- **Live market data** sourced on demand from Yahoo Finance with resilient quote/chart fallbacks
-- **Live market lab** page with ticker search, candlestick overlays, and intraday stats powered by Yahoo Finance
-- **AI-assisted strategy lab** that trains and backtests SMA crossovers on 5-year history and generates live signals
-- **Hybrid chatbot copilot** using local Ollama (Mistral) with DuckDuckGo fallback for research and automation, now including budget-aware, diversified allocation suggestions for short horizons
-- **Simulation workspace** for creating, updating, and tracking algorithmic trading experiments
-- **Home analytics dashboard** surfacing portfolio stats, trained strategies, and recent results
-- **Session recovery** using browser storage so signed-in users can resume quickly
+Once a strategy is trained, the application can generate real-time buy, sell, or hold signals based on the latest market data and momentum indicators. This predictive feature allows users to see how their trained models would perform in current market conditions, bridging the gap between historical backtesting and live trading.
 
-## Tech stack
+Enhancing the user experience is an AI-powered chatbot, driven by Google Gemini, which acts as an intelligent trading assistant. The chatbot can provide market insights, answer questions about trading strategies, and even help users create new simulations, offering a conversational interface for complex financial analysis.
 
-| Area     | Technology |
-|----------|------------|
-| Frontend | React + Vite + TypeScript |
-| Backend  | FastAPI, Motor (MongoDB), Passlib |
-| Database | MongoDB |
-| Market data | Yahoo Finance quote & chart APIs (via requests) |
+## Key Features:
+
+*   **Quantitative Strategy Backtesting:** Train and evaluate SMA crossover strategies on 5-year historical market data.
+*   **Performance Analytics:** Gain insights into your strategies with key metrics like total return, annualized return, win rate, Sharpe ratio, and max drawdown.
+*   **Real-Time Signal Generation:** Get buy, sell, or hold recommendations based on your trained models and current market momentum.
+*   **AI-Powered Chatbot:** Interact with a Google Gemini-powered assistant for market insights and educational guidance.
+*   **Live Market Data:** Access real-time stock quotes, charts, and market data from Yahoo Finance.
+*   **Interactive Dashboard:** Monitor your portfolio, track simulations, and view key analytics from a centralized home dashboard.
+*   **Modern Tech Stack:** Built with React, TypeScript, Python, and FastAPI for a high-performance, scalable, and maintainable application.
+
+Whether you're a seasoned quant or just beginning to explore the world of algorithmic trading, the Algo Trade Simulator provides a powerful and intuitive platform to test your ideas and hone your strategies.
 
 ## Getting started
 
