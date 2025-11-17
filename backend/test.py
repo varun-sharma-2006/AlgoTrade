@@ -2,8 +2,11 @@ import asyncio
 import os
 import sys
 
+from dotenv import load_dotenv
 from motor.motor_asyncio import AsyncIOMotorClient
 from pymongo.errors import ServerSelectionTimeoutError
+
+load_dotenv()
 
 TRUTHY_ENV_VALUES = {"1", "true", "yes", "on"}
 
@@ -34,7 +37,18 @@ async def ping_mongo(uri: str) -> None:
     print(f"Ping successful: {result}")
 
 
+def check_google_api_key() -> bool:
+    api_key = os.getenv("GOOGLE_API_KEY")
+    if not api_key:
+        print("Warning: GOOGLE_API_KEY is not set. Chatbot features will be disabled.")
+        return False
+    print("GOOGLE_API_KEY is configured.")
+    return True
+
+
 async def main() -> int:
+    check_google_api_key()
+
     if env_flag("USE_IN_MEMORY_DB"):
         print("USE_IN_MEMORY_DB is enabled; skipping MongoDB connection test.")
         return 0

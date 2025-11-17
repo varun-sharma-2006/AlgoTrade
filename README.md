@@ -27,42 +27,55 @@ Whether you're a seasoned quant or just beginning to explore the world of algori
 - Node.js 18 or later
 - Python 3.11 or later
 - A running MongoDB instance (Atlas or local)
+- A Google Gemini API key
 
-### Backend setup
+### Setup
 
-1. Create a virtual environment and install dependencies:
-   ```bash
-   cd backend
-   python -m venv .venv
-   source .venv/bin/activate  # On Windows use `.venv\\Scripts\\activate`
-   pip install -r requirements.txt
-   ```
-2. Configure environment variables (defaults are provided below). You can create a `.env` file in `backend/` if desired.
-3. Start the FastAPI server:
-   ```bash
-   uvicorn backend.main:app --reload --port 8000
-   ```
-   > To run without MongoDB during development, export `USE_IN_MEMORY_DB=true`. All data is ephemeral and resets on restart.
-4. (Optional) Verify MongoDB connectivity:
-   ```bash
-   python test.py
-   ```
+#### Backend
+
+1.  Create a virtual environment and install dependencies:
+    ```bash
+    cd backend
+    python -m venv .venv
+    source .venv/bin/activate  # On Windows use `.venv\Scripts\activate`
+    pip install -r requirements.txt
+    ```
+2.  Create a `.env` file in the `backend` directory. You can copy the provided `backend/.env.example` to get started.
+    ```
+    MONGO_URL="mongodb://localhost:27017"
+    GOOGLE_API_KEY="your-google-api-key"
+    ```
+3.  Start the FastAPI server:
+    ```bash
+    uvicorn backend.main:app --reload --port 8000 --env-file backend/.env
+    ```
+    > To run without MongoDB during development, set `USE_IN_MEMORY_DB=true` in your `.env` file. All data is ephemeral and resets on restart.
+4.  (Optional) Verify your setup:
+    ```bash
+    python backend/test.py
+    ```
 
 The API will be available at `http://localhost:8000` and includes automatically generated Swagger docs at `/docs`.
 
-### Frontend setup
+#### Frontend
 
-1. Install dependencies from the repository root:
-   ```bash
-   npm install
-   ```
-2. Start the Vite dev server:
-   ```bash
-   npm run dev
-   ```
-3. Open `http://localhost:5173` in your browser. The frontend proxies API requests to `http://localhost:8000` by default. You can override this by setting `VITE_API_BASE_URL` in `client/.env`.
+1.  Install dependencies from the repository root:
+    ```bash
+    npm install
+    ```
+2.  (Optional) Create a `.env` file in the `client` directory to enable the login bypass for development:
+    ```
+    VITE_ENABLE_LOGIN_BYPASS=true
+    ```
+3.  Start the Vite dev server:
+    ```bash
+    npm run dev
+    ```
+4.  Open `http://localhost:5173` in your browser. The frontend proxies API requests to `http://localhost:8000` by default. You can override this by setting `VITE_API_BASE_URL` in `client/.env`.
 
 ## Configuration
+
+### Backend environment variables
 
 The backend recognises the following environment variables:
 
@@ -72,6 +85,7 @@ The backend recognises the following environment variables:
 | `MONGODB_URI` | Alternate connection string (used if `MONGO_URL` is unset) | `mongodb://localhost:27017` |
 | `MONGO_URI` | Legacy connection string key (used if the others are unset) | unset |
 | `MONGODB_DB` | Database name | `algo-trade-simulator` |
+| `GOOGLE_API_KEY` | Google Gemini API key for the chatbot | unset |
 | `FRONTEND_ORIGIN` | Allowed CORS origin for the web app | `http://localhost:5173` |
 | `SESSION_DURATION_DAYS` | Optional override for session lifetime in days | `7` |
 | `ENABLE_DEV_ENDPOINTS` | Enables development-only routes such as the login bypass helper | `false` |
@@ -85,7 +99,7 @@ The backend recognises the following environment variables:
 
 > If multiple Mongo variables are set, `MONGO_URL` wins, followed by `MONGODB_URI`, then the legacy `MONGO_URI`.
 
-### Frontend environment
+### Frontend environment variables
 
 The Vite frontend honours the following environment variables:
 
@@ -123,11 +137,10 @@ The FastAPI server exposes REST endpoints. Key routes include:
 
 ## Strategy lab & chatbot
 
-1. Ensure the backend can reach Yahoo Finance (no VPN/proxy required) and that Ollama is running locally with the Mistral model pulled (`ollama run mistral`).
-2. Train a strategy from the **Simulations** page or via `POST /analytics/train` with a symbol plus short/long SMA windows (default 20/60).
-3. Request a fresh prediction from the **Home** page or `POST /analytics/predict` to evaluate the current market regime.
-4. Use the **Chatbot** page to ask questions, run quick research, or say "create a simulation for AAPL with 25k" to auto-spin a test scenario.
-
+1.  Ensure the backend can reach Yahoo Finance (no VPN/proxy required) and that your Google Gemini API key is configured.
+2.  Train a strategy from the **Simulations** page or via `POST /analytics/train` with a symbol plus short/long SMA windows (default 20/60).
+3.  Request a fresh prediction from the **Home** page or `POST /analytics/predict` to evaluate the current market regime.
+4.  Use the **Chatbot** page to ask questions, run quick research, or say "create a simulation for AAPL with 25k" to auto-spin a test scenario.
 
 Requests that require authentication expect an `Authorization: Bearer <token>` header. Tokens automatically expire after seven days.
 

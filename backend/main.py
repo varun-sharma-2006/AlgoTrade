@@ -113,8 +113,8 @@ class Settings(BaseModel):
     frontend_origin: str = Field(default_factory=lambda: os.getenv("FRONTEND_ORIGIN", "http://localhost:5173"))
     session_duration_days: int = Field(default_factory=lambda: int(os.getenv("SESSION_DURATION_DAYS", "7")))
     enable_dev_endpoints: bool = Field(default_factory=lambda: env_flag("ENABLE_DEV_ENDPOINTS"))
-    use_in_memory_db: bool = Field(default_factory=lambda: env_flag("USE_IN_MEMORY_DB", "true"))
-    google_api_key: str = Field(default_factory=lambda: os.getenv("GOOGLE_API_KEY"))
+    use_in_memory_db: bool = Field(default_factory=lambda: env_flag("USE_IN_MEMORY_DB", "false"))
+    google_api_key: Optional[str] = Field(default_factory=lambda: os.getenv("GOOGLE_API_KEY"))
     yahoo_user_agent: str = Field(
         default_factory=lambda: os.getenv(
             "YAHOO_USER_AGENT",
@@ -720,26 +720,27 @@ async def predict(payload: PredictionPayload, user: Dict[str, Any] = Depends(get
 async def chat(payload: ChatRequest, user: Dict[str, Any] = Depends(get_current_user)) -> Dict[str, Any]:
     _ = user
     if not settings.google_api_key:
-        raise HTTPException(status_code=500, detail="Chatbot API key is not configured")
+        raise HTTPException(status_code=501, detail="Chatbot API key is not configured")
 
     genai.configure(api_key=settings.google_api_key)
-    model = genai.GenerativeModel('gemini-pro')
+    model = genai.GenerativeModel("gemini-pro")
+
+    if INVESTMENT_PROMPT_RE.search(payload.message):
+        return build_investment_reply(payload.message)
 
     system_prompt = (
         "You are a helpful assistant for an algorithmic trading simulator. "
         "Your expertise is in stocks, portfolio management, and algorithmic trading strategies. "
         "When providing advice, always remind the user that your insights are for educational purposes and "
-        "that they should conduct their own research before making any investment decisions as you are just an aid tool."
+        "that they should conduct their own research before making any investment decisions."
     )
 
     try:
-        response = model.generate_content(
-            f"{system_prompt}\n\nUser query: {payload.message}"
-        )
+        response = model.generate_content(f"{system_prompt}\n\nUser query: {payload.message}")
         reply = response.text
-    except Exception as e:
-        logger.error(f"Gemini API error: {e}")
-        raise HTTPException(status_code=502, detail="Error communicating with the chatbot service")
+    except Exception as exc:
+        logger.error(f"Gemini API error: {exc}")
+        raise HTTPException(status_code=502, detail="Error communicating with the chatbot service") from exc
 
     disclaimer = (
         "\n\nDisclaimer: I am a chatbot. All decisions should not be made solely on my response. "
