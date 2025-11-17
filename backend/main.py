@@ -172,7 +172,12 @@ class MongoStore:
 
     async def resolve_token(self, token: str) -> Optional[Dict[str, Any]]:
         session = await self.db.sessions.find_one({"_id": token})
-        if not session or session["expires_at"] <= now():
+        if not session:
+            return None
+        expires_at = session["expires_at"]
+        if expires_at.tzinfo is None:
+            expires_at = expires_at.replace(tzinfo=timezone.utc)
+        if expires_at <= now():
             return None
         user = await self.db.users.find_one({"_id": session["user_id"]})
         if not user:
