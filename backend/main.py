@@ -10,7 +10,7 @@ import logging
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
-import google.generai as genai
+import google.generativeai as genai
 import requests
 
 try:
