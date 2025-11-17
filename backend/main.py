@@ -170,6 +170,15 @@ class MongoStore:
     def trained(self) -> AsyncIOMotorDatabase:
         return self.db.trained
 
+    async def resolve_token(self, token: str) -> Optional[Dict[str, Any]]:
+        session = await self.db.sessions.find_one({"_id": token})
+        if not session or session["expires_at"] <= now():
+            return None
+        user = await self.db.users.find_one({"_id": session["user_id"]})
+        if not user:
+            return None
+        return {"id": str(user["_id"]), "email": user["email"], "name": user["name"]}
+
 
 async def get_db() -> AsyncIOMotorDatabase:
     if not app.state.store:
