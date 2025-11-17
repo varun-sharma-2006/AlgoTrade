@@ -10,6 +10,7 @@ import logging
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
+import google.generai as genai
 import requests
 
 try:
@@ -113,6 +114,7 @@ class Settings(BaseModel):
     session_duration_days: int = Field(default_factory=lambda: int(os.getenv("SESSION_DURATION_DAYS", "7")))
     enable_dev_endpoints: bool = Field(default_factory=lambda: env_flag("ENABLE_DEV_ENDPOINTS"))
     use_in_memory_db: bool = Field(default_factory=lambda: env_flag("USE_IN_MEMORY_DB", "true"))
+    google_api_key: str = Field(default_factory=lambda: os.getenv("GOOGLE_API_KEY"))
     yahoo_user_agent: str = Field(
         default_factory=lambda: os.getenv(
             "YAHOO_USER_AGENT",
@@ -717,17 +719,71 @@ async def predict(payload: PredictionPayload, user: Dict[str, Any] = Depends(get
 @app.post("/chat")
 async def chat(payload: ChatRequest, user: Dict[str, Any] = Depends(get_current_user)) -> Dict[str, Any]:
     _ = user
-    if INVESTMENT_PROMPT_RE.search(payload.message):
-        prepared = build_investment_reply(payload.message)
-        return {"reply": prepared["reply"], "citations": prepared["citations"], "actions": []}
-    if payload.message.lower().startswith("create a simulation"):
-        reply = "Jump to the Simulations page and use the create form on the left. I will automate this workflow in a future release."
-        return {"reply": reply, "citations": [], "actions": []}
-    fallback = (
-        "I can help with short-term stock ideas, chart lookups, and strategy summaries. "
-        "Try asking: 'Which stock should I invest in now if I have 5000 and I'm thinking to invest for 5 days?'"
+    user_id = user["id"]
+
+    async def create_simulation_tool(
+        symbol: str,
+        strategy: str,
+        starting_capital: float,
+    ) -> str:
+        """Creates a new trading simulation.
+
+        Args:
+            symbol: The stock symbol for the simulation (e.g., 'AAPL', 'GOOGL').
+            strategy: The trading strategy to use (e.g., 'sma-crossover', 'mean-reversion').
+            starting_capital: The initial capital for the simulation.
+        """
+        simulation_input = SimulationInput(
+            symbol=symbol,
+            strategy=strategy,
+            startingCapital=starting_capital,
+        )
+        new_sim = await store.add_simulation(user_id, simulation_input)
+        return f"Successfully created simulation {new_sim['id']} for {symbol} with a starting capital of {starting_capital}."
+
+    if not settings.google_api_key:
+        raise HTTPException(status_code=500, detail="Chatbot API key is not configured")
+
+    genai.configure(api_key=settings.google_api_key)
+    model = genai.GenerativeModel(
+        model_name='gemini-pro',
+        generation_config={"tool_config": {"function_calling_config": "AUTO"}},
+        system_instruction=(
+            "You are a helpful assistant for an algorithmic trading simulator. "
+            "Your expertise is in stocks, portfolio management, and algorithmic trading strategies. "
+            "You can also create trading simulations for users. For example, 'Create a simulation for AAPL using the sma-crossover strategy with $10000.' "
+            "When providing advice, always remind the user that your insights are for educational purposes and "
+            "that they should conduct their own research before making any investment decisions as you are just an aid tool."
+        ),
+        tools=[create_simulation_tool]
     )
-    return {"reply": fallback, "citations": [], "actions": []}
+
+    gemini_history = []
+    for item in payload.history:
+        gemini_history.append({
+            "role": item.role,
+            "parts": [{"text": item.content}]
+        })
+
+    chat_session = model.start_chat(
+        history=gemini_history,
+        enable_automatic_function_calling=True
+    )
+
+    try:
+        response = await chat_session.send_message_async(payload.message)
+        reply = response.text
+    except Exception as e:
+        logger.error(f"Gemini API error: {e}")
+        raise HTTPException(status_code=502, detail="Error communicating with the chatbot service")
+
+    disclaimer = (
+        "\n\nDisclaimer: I am a chatbot. All decisions should not be made solely on my response. "
+        "Please conduct your own research, as I am just an aid tool."
+    )
+    full_reply = f"{reply}{disclaimer}"
+
+    return {"reply": full_reply, "citations": [], "actions": []}
 
 
 @app.get("/health")
