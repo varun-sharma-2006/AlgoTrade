@@ -956,7 +956,7 @@ async def chat(payload: ChatRequest, user: Dict[str, Any] = Depends(get_current_
         raise HTTPException(status_code=501, detail="Chatbot API key is not configured")
 
     genai.configure(api_key=settings.google_api_key)
-    model = genai.GenerativeModel("gemini-1.5-flash")
+    model = genai.GenerativeModel("gemini-pro-latest")
 
     if INVESTMENT_PROMPT_RE.search(payload.message):
         return build_investment_reply(payload.message)
