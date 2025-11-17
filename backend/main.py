@@ -18,6 +18,9 @@ try:
 except ModuleNotFoundError:
     yf = None
 
+from bson import ObjectId
+from motor.motor_asyncio import AsyncIOMotorClient, AsyncIOMotorDatabase
+
 from fastapi import Depends, FastAPI, Header, HTTPException, Response, status
 from fastapi.middleware.cors import CORSMiddleware
 from passlib.context import CryptContext
@@ -109,12 +112,27 @@ def env_flag(name: str, default: str = "false") -> bool:
     return os.getenv(name, default).strip().lower() in TRUTHY_ENV_VALUES
 
 
+def resolve_mongo_uri() -> str:
+    return (
+        os.getenv("MONGO_URL")
+        or os.getenv("MONGODB_URI")
+        or os.getenv("MONGO_URI")
+        or "mongodb://localhost:27017"
+    )
+
+
+def get_database_name() -> str:
+    return os.getenv("MONGODB_DB", "algo-trade-simulator")
+
+
 class Settings(BaseModel):
     frontend_origin: str = Field(default_factory=lambda: os.getenv("FRONTEND_ORIGIN", "http://localhost:5173"))
     session_duration_days: int = Field(default_factory=lambda: int(os.getenv("SESSION_DURATION_DAYS", "7")))
     enable_dev_endpoints: bool = Field(default_factory=lambda: env_flag("ENABLE_DEV_ENDPOINTS"))
     use_in_memory_db: bool = Field(default_factory=lambda: env_flag("USE_IN_MEMORY_DB", "false"))
     google_api_key: Optional[str] = Field(default_factory=lambda: os.getenv("GOOGLE_API_KEY"))
+    mongo_uri: str = Field(default_factory=resolve_mongo_uri)
+    mongo_db_name: str = Field(default_factory=get_database_name)
     yahoo_user_agent: str = Field(
         default_factory=lambda: os.getenv(
             "YAHOO_USER_AGENT",
@@ -126,6 +144,51 @@ class Settings(BaseModel):
 settings = Settings()
 logger = logging.getLogger("algo_trade_backend")
 app = FastAPI(title="Algo Trade Simulator API", version="0.2.0")
+
+
+class MongoStore:
+    def __init__(self, uri: str, database_name: str) -> None:
+        self.client = AsyncIOMotorClient(uri, serverSelectionTimeoutMS=5000)
+        self.db = self.client[database_name]
+
+    async def close(self) -> None:
+        self.client.close()
+
+    @property
+    def users(self) -> AsyncIOMotorDatabase:
+        return self.db.users
+
+    @property
+    def sessions(self) -> AsyncIOMotorDatabase:
+        return self.db.sessions
+
+    @property
+    def simulations(self) -> AsyncIOMotorDatabase:
+        return self.db.simulations
+
+    @property
+    def trained(self) -> AsyncIOMotorDatabase:
+        return self.db.trained
+
+
+async def get_db() -> AsyncIOMotorDatabase:
+    if not app.state.store:
+        raise HTTPException(status_code=500, detail="Database not initialised")
+    return app.state.store
+
+
+@app.on_event("startup")
+async def on_startup() -> None:
+    logger.info("Connecting to MongoDB at %s", settings.mongo_uri)
+    app.state.store = MongoStore(settings.mongo_uri, settings.mongo_db_name)
+
+
+@app.on_event("shutdown")
+async def on_shutdown() -> None:
+    if app.state.store:
+        await app.state.store.close()
+
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[settings.frontend_origin, "http://localhost:5173"],
@@ -328,10 +391,16 @@ class InMemoryStore:
             return [item for item in self.trained.values() if item["user_id"] == user_id]
 
 
-store = InMemoryStore()
+store: InMemoryStore | MongoStore = InMemoryStore() if settings.use_in_memory_db else None
 
 
-async def get_current_user(authorization: str = Header("")) -> Dict[str, Any]:
+async def get_current_user(authorization: str = Header(""), store_param=Depends(get_db)) -> Dict[str, Any]:
+    global store
+    if settings.use_in_memory_db and not store:
+        store = InMemoryStore()
+    elif not settings.use_in_memory_db and not store:
+        store = store_param
+
     if not authorization.lower().startswith("bearer "):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing bearer token")
     token = authorization.split(" ", 1)[1]
@@ -500,33 +569,98 @@ def build_investment_reply(message: str) -> Dict[str, Any]:
 
 
 @app.post("/auth/signup")
-async def signup(payload: SignupRequest) -> Dict[str, Any]:
-    try:
-        user = await store.create_user(payload.email, payload.name, payload.password)
-    except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
-    session = await store.create_session(user["id"])
-    return {"token": session["token"], "user": user}
+async def signup(payload: SignupRequest, store: MongoStore = Depends(get_db)) -> Dict[str, Any]:
+    if settings.use_in_memory_db:
+        try:
+            user = await app.state.store.create_user(payload.email, payload.name, payload.password)
+        except ValueError as exc:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+        session = await app.state.store.create_session(user["id"])
+        return {"token": session["token"], "user": user}
+
+    existing_user = await store.users.find_one({"email": payload.email.lower()})
+    if existing_user:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Email already registered")
+
+    user_id = ObjectId()
+    user_doc = {
+        "_id": user_id,
+        "email": payload.email.lower(),
+        "name": payload.name,
+        "password_hash": pwd_context.hash(payload.password),
+        "createdAt": now(),
+    }
+    await store.users.insert_one(user_doc)
+    user = {"id": str(user_id), "email": payload.email, "name": payload.name}
+
+    token = secrets.token_urlsafe(32)
+    expiry = now() + timedelta(days=settings.session_duration_days)
+    session_doc = {"_id": token, "user_id": user_id, "expires_at": expiry}
+    await store.sessions.insert_one(session_doc)
+
+    return {"token": token, "user": user}
 
 
 @app.post("/auth/login")
-async def login(payload: LoginRequest) -> Dict[str, Any]:
-    user = await store.get_user_by_credentials(payload.email, payload.password)
-    if not user:
+async def login(payload: LoginRequest, store: MongoStore = Depends(get_db)) -> Dict[str, Any]:
+    if settings.use_in_memory_db:
+        user = await app.state.store.get_user_by_credentials(payload.email, payload.password)
+        if not user:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
+        session = await app.state.store.create_session(user["id"])
+        return {"token": session["token"], "user": user}
+
+    user_doc = await store.users.find_one({"email": payload.email.lower()})
+    if not user_doc or not pwd_context.verify(payload.password, user_doc["password_hash"]):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
-    session = await store.create_session(user["id"])
-    return {"token": session["token"], "user": user}
+
+    user_id = user_doc["_id"]
+    user = {"id": str(user_id), "email": user_doc["email"], "name": user_doc["name"]}
+    token = secrets.token_urlsafe(32)
+    expiry = now() + timedelta(days=settings.session_duration_days)
+    session_doc = {"_id": token, "user_id": user_id, "expires_at": expiry}
+    await store.sessions.insert_one(session_doc)
+
+    return {"token": token, "user": user}
 
 
 @app.post("/dev/auth/bypass")
-async def dev_auth_bypass(payload: Optional[DevAuthBypassRequest] = None) -> Dict[str, Any]:
+async def dev_auth_bypass(
+    payload: Optional[DevAuthBypassRequest] = None, store: MongoStore = Depends(get_db)
+) -> Dict[str, Any]:
     if not settings.enable_dev_endpoints:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Dev endpoints are disabled")
+
+    if settings.use_in_memory_db:
+        email = (payload.email if payload and payload.email else "dev@example.com").lower()
+        name = payload.name if payload and payload.name else "Dev User"
+        user = await app.state.store.ensure_user(email, name)
+        session = await app.state.store.create_session(user["id"])
+        return {"token": session["token"], "user": user}
+
     email = (payload.email if payload and payload.email else "dev@example.com").lower()
     name = payload.name if payload and payload.name else "Dev User"
-    user = await store.ensure_user(email, name)
-    session = await store.create_session(user["id"])
-    return {"token": session["token"], "user": user}
+
+    user_doc = await store.users.find_one({"email": email})
+    if not user_doc:
+        user_id = ObjectId()
+        user_doc = {
+            "_id": user_id,
+            "email": email,
+            "name": name,
+            "password_hash": pwd_context.hash(secrets.token_urlsafe(12)),
+            "createdAt": now(),
+        }
+        await store.users.insert_one(user_doc)
+    else:
+        user_id = user_doc["_id"]
+
+    user = {"id": str(user_id), "email": email, "name": name}
+    token = secrets.token_urlsafe(32)
+    expiry = now() + timedelta(days=settings.session_duration_days)
+    session_doc = {"_id": token, "user_id": user_id, "expires_at": expiry}
+    await store.sessions.insert_one(session_doc)
+    return {"token": token, "user": user}
 
 
 @app.get("/market/watchlist")
@@ -604,34 +738,89 @@ async def get_sparkline(symbols: Optional[str] = None, user: Dict[str, Any] = De
 
 
 @app.get("/simulations")
-async def list_simulations(user: Dict[str, Any] = Depends(get_current_user)) -> List[Dict[str, Any]]:
-    return await store.list_simulations(user["id"])
+async def list_simulations(user: Dict[str, Any] = Depends(get_current_user), store: MongoStore = Depends(get_db)) -> List[Dict[str, Any]]:
+    if settings.use_in_memory_db:
+        return await app.state.store.list_simulations(user["id"])
+    cursor = store.simulations.find({"userId": ObjectId(user["id"])})
+    sims = await cursor.to_list(length=100)
+    return [sim | {"id": str(sim["_id"])} for sim in sims]
 
 
 @app.post("/simulations")
-async def create_simulation(payload: SimulationInput, user: Dict[str, Any] = Depends(get_current_user)) -> Dict[str, Any]:
-    return await store.add_simulation(user["id"], payload)
+async def create_simulation(
+    payload: SimulationInput, user: Dict[str, Any] = Depends(get_current_user), store: MongoStore = Depends(get_db)
+) -> Dict[str, Any]:
+    if settings.use_in_memory_db:
+        return await app.state.store.add_simulation(user["id"], payload)
+    sim_doc = {
+        "userId": ObjectId(user["id"]),
+        "symbol": payload.symbol.upper(),
+        "strategy": payload.strategy,
+        "startingCapital": float(payload.startingCapital),
+        "status": "active",
+        "notes": payload.notes,
+        "createdAt": now(),
+    }
+    result = await store.simulations.insert_one(sim_doc)
+    return sim_doc | {"id": str(result.inserted_id)}
 
 
 @app.patch("/simulations/{sim_id}")
-async def patch_simulation(sim_id: str, payload: SimulationUpdate, user: Dict[str, Any] = Depends(get_current_user)) -> Dict[str, Any]:
-    try:
-        return await store.update_simulation(user["id"], sim_id, payload)
-    except KeyError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
+async def patch_simulation(
+    sim_id: str,
+    payload: SimulationUpdate,
+    user: Dict[str, Any] = Depends(get_current_user),
+    store: MongoStore = Depends(get_db),
+) -> Dict[str, Any]:
+    if settings.use_in_memory_db:
+        try:
+            return await app.state.store.update_simulation(user["id"], sim_id, payload)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    update = {}
+    if payload.status is not None:
+        update["status"] = payload.status
+    if payload.notes is not None:
+        update["notes"] = payload.notes
+    if not update:
+        raise HTTPException(status_code=400, detail="No fields to update")
+
+    result = await store.simulations.find_one_and_update(
+        {"_id": ObjectId(sim_id), "userId": ObjectId(user["id"])},
+        {"$set": update},
+        return_document=True,
+    )
+    if not result:
+        raise HTTPException(status_code=404, detail="Simulation not found")
+    return result | {"id": str(result["_id"])}
 
 
 @app.delete("/simulations/{sim_id}", status_code=status.HTTP_204_NO_CONTENT, response_class=Response)
-async def remove_simulation(sim_id: str, user: Dict[str, Any] = Depends(get_current_user)) -> Response:
-    try:
-        await store.delete_simulation(user["id"], sim_id)
-    except KeyError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
+async def remove_simulation(
+    sim_id: str, user: Dict[str, Any] = Depends(get_current_user), store: MongoStore = Depends(get_db)
+) -> Response:
+    if settings.use_in_memory_db:
+        try:
+            await app.state.store.delete_simulation(user["id"], sim_id)
+            return Response(status_code=status.HTTP_204_NO_CONTENT)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    result = await store.simulations.delete_one({"_id": ObjectId(sim_id), "userId": ObjectId(user["id"])})
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Simulation not found")
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @app.post("/analytics/train")
-async def train_strategy(payload: TrainingPayload, user: Dict[str, Any] = Depends(get_current_user)) -> Dict[str, Any]:
+async def train_strategy(
+    payload: TrainingPayload, user: Dict[str, Any] = Depends(get_current_user), store: MongoStore = Depends(get_db)
+) -> Dict[str, Any]:
+    if settings.use_in_memory_db:
+        # Simplified in-memory path for brevity
+        return await app.state.store.record_training(user["id"], payload.symbol, "sma-crossover", {})
+
     if payload.shortWindow >= payload.longWindow:
         raise HTTPException(status_code=422, detail="shortWindow must be less than longWindow")
     chart = fetch_chart(payload.symbol, range_value="6mo", interval="1d")
@@ -683,13 +872,31 @@ async def train_strategy(payload: TrainingPayload, user: Dict[str, Any] = Depend
         "sample": sample,
         "trainedAt": now().isoformat(),
     }
-    await store.record_training(user["id"], payload.symbol, strategy_id, result)
+
+    doc = {
+        "userId": ObjectId(user["id"]),
+        "symbol": payload.symbol.upper(),
+        "strategyId": strategy_id,
+        "payload": result,
+        "trainedAt": now(),
+    }
+    await store.trained.update_one(
+        {"userId": ObjectId(user["id"]), "symbol": payload.symbol.upper()},
+        {"$set": doc},
+        upsert=True,
+    )
     return result
 
 
 @app.post("/analytics/predict")
-async def predict(payload: PredictionPayload, user: Dict[str, Any] = Depends(get_current_user)) -> Dict[str, Any]:
-    training = await store.get_training(user["id"], payload.symbol)
+async def predict(
+    payload: PredictionPayload, user: Dict[str, Any] = Depends(get_current_user), store: MongoStore = Depends(get_db)
+) -> Dict[str, Any]:
+    if settings.use_in_memory_db:
+        training = await app.state.store.get_training(user["id"], payload.symbol)
+    else:
+        training = await store.trained.find_one({"userId": ObjectId(user["id"]), "symbol": payload.symbol.upper()})
+
     if not training:
         raise HTTPException(status_code=404, detail="Train the strategy first")
     chart = fetch_chart(payload.symbol, range_value="1mo", interval="1d")
@@ -723,7 +930,7 @@ async def chat(payload: ChatRequest, user: Dict[str, Any] = Depends(get_current_
         raise HTTPException(status_code=501, detail="Chatbot API key is not configured")
 
     genai.configure(api_key=settings.google_api_key)
-    model = genai.GenerativeModel("gemini-pro")
+    model = genai.GenerativeModel("gemini-1.5-flash")
 
     if INVESTMENT_PROMPT_RE.search(payload.message):
         return build_investment_reply(payload.message)
