@@ -184,6 +184,16 @@ class MongoStore:
             return None
         return {"id": str(user["_id"]), "email": user["email"], "name": user["name"]}
 
+    async def list_simulations(self, user_id: str) -> List[Dict[str, Any]]:
+        cursor = self.simulations.find({"userId": ObjectId(user_id)})
+        sims = await cursor.to_list(length=100)
+        return [sim | {"id": str(sim["_id"])} for sim in sims]
+
+    async def list_trained(self, user_id: str) -> List[Dict[str, Any]]:
+        cursor = self.trained.find({"userId": ObjectId(user_id)})
+        trained_list = await cursor.to_list(length=100)
+        return [item | {"id": str(item["_id"])} for item in trained_list]
+
 
 async def get_db() -> AsyncIOMotorDatabase:
     if not app.state.store:
@@ -714,7 +724,9 @@ async def get_strategies() -> List[Dict[str, Any]]:
 
 
 @app.get("/analytics/overview")
-async def get_overview(user: Dict[str, Any] = Depends(get_current_user)) -> Dict[str, Any]:
+async def get_overview(
+    user: Dict[str, Any] = Depends(get_current_user), store: MongoStore = Depends(get_db)
+) -> Dict[str, Any]:
     simulations = await store.list_simulations(user["id"])
     trained = await store.list_trained(user["id"])
     total_capital = sum(sim["startingCapital"] for sim in simulations)

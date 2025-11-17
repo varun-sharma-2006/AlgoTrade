@@ -61,3 +61,50 @@ async def test_resolve_token_mocked(store: MongoStore):
     }
     user = await store.resolve_token(token)
     assert user is None
+
+
+@pytest.mark.asyncio
+async def test_get_overview_endpoint(store: MongoStore):
+    user_id = "some_user_id"
+    store.list_simulations = AsyncMock(
+        return_value=[
+            {
+                "id": "sim1",
+                "userId": user_id,
+                "startingCapital": 10000,
+                "status": "active",
+                "createdAt": "2023-01-01T12:00:00Z",
+            }
+        ]
+    )
+    store.list_trained = AsyncMock(
+        return_value=[
+            {
+                "id": "train1",
+                "userId": user_id,
+                "symbol": "AAPL",
+                "strategy_id": "sma-crossover",
+                "payload": {},
+            }
+        ]
+    )
+
+    from fastapi.testclient import TestClient
+    from backend.main import app, get_current_user, get_db
+
+    async def override_get_current_user():
+        return {"id": user_id}
+
+    async def override_get_db():
+        return store
+
+    app.dependency_overrides[get_current_user] = override_get_current_user
+    app.dependency_overrides[get_db] = override_get_db
+
+    client = TestClient(app)
+    response = client.get("/analytics/overview")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["totals"]["totalSimulations"] == 1
+    assert data["totals"]["trainedModels"] == 1
