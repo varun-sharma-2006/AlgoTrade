@@ -187,12 +187,12 @@ class MongoStore:
     async def list_simulations(self, user_id: str) -> List[Dict[str, Any]]:
         cursor = self.simulations.find({"userId": ObjectId(user_id)})
         sims = await cursor.to_list(length=100)
-        return [sim | {"id": str(sim["_id"])} for sim in sims]
+        return serialize_mongo_doc(sims)
 
     async def list_trained(self, user_id: str) -> List[Dict[str, Any]]:
         cursor = self.trained.find({"userId": ObjectId(user_id)})
         trained_list = await cursor.to_list(length=100)
-        return [item | {"id": str(item["_id"])} for item in trained_list]
+        return serialize_mongo_doc(trained_list)
 
 
 def serialize_mongo_doc(doc: Any) -> Any:
@@ -761,7 +761,7 @@ async def get_overview(
     return {
         "totals": totals,
         "watchlist": WATCHLIST_SYMBOLS,
-        "recentSimulations": recent,
+        "recentSimulations": serialize_mongo_doc(recent),
         "strategiesTrained": trained_symbols,
     }
 
