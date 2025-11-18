@@ -195,6 +195,21 @@ class MongoStore:
         return [item | {"id": str(item["_id"])} for item in trained_list]
 
 
+def serialize_mongo_doc(doc: Any) -> Any:
+    if isinstance(doc, dict):
+        serialized = {key: serialize_mongo_doc(value) for key, value in doc.items()}
+        if "_id" in serialized:
+            serialized["id"] = serialized.pop("_id")
+        return serialized
+    if isinstance(doc, list):
+        return [serialize_mongo_doc(item) for item in doc]
+    if isinstance(doc, ObjectId):
+        return str(doc)
+    if isinstance(doc, datetime):
+        return doc.isoformat()
+    return doc
+
+
 async def get_db() -> AsyncIOMotorDatabase:
     if not app.state.store:
         raise HTTPException(status_code=500, detail="Database not initialised")
@@ -400,7 +415,7 @@ class InMemoryStore:
             key = f"{user_id}:{symbol.upper()}"
             self.trained[key] = {
                 "symbol": symbol.upper(),
-                "strategy_id": strategy_id,
+                "strategyId": strategy_id,
                 "user_id": user_id,
                 "payload": payload,
                 "trained_at": now().isoformat(),
@@ -739,7 +754,10 @@ async def get_overview(
         "trainedModels": len(trained),
     }
     recent = sorted(simulations, key=lambda item: item["createdAt"], reverse=True)[:5]
-    trained_symbols = [f"{entry['symbol']} ({entry['payload'].get('strategyId', entry['strategy_id'])})" for entry in trained]
+    trained_symbols = [
+        f"{entry['symbol']} ({entry.get('payload', {}).get('strategyId') or entry.get('strategy_id')})"
+        for entry in trained
+    ]
     return {
         "totals": totals,
         "watchlist": WATCHLIST_SYMBOLS,
@@ -769,7 +787,7 @@ async def list_simulations(user: Dict[str, Any] = Depends(get_current_user), sto
         return await app.state.store.list_simulations(user["id"])
     cursor = store.simulations.find({"userId": ObjectId(user["id"])})
     sims = await cursor.to_list(length=100)
-    return [sim | {"id": str(sim["_id"])} for sim in sims]
+    return serialize_mongo_doc(sims)
 
 
 @app.post("/simulations")
@@ -788,7 +806,7 @@ async def create_simulation(
         "createdAt": now(),
     }
     result = await store.simulations.insert_one(sim_doc)
-    return sim_doc | {"id": str(result.inserted_id)}
+    return serialize_mongo_doc(sim_doc | {"_id": result.inserted_id})
 
 
 @app.patch("/simulations/{sim_id}")
@@ -819,7 +837,7 @@ async def patch_simulation(
     )
     if not result:
         raise HTTPException(status_code=404, detail="Simulation not found")
-    return result | {"id": str(result["_id"])}
+    return serialize_mongo_doc(result)
 
 
 @app.delete("/simulations/{sim_id}", status_code=status.HTTP_204_NO_CONTENT, response_class=Response)
@@ -938,9 +956,10 @@ async def predict(
         f"Short-term momentum is {'positive' if signal == 'buy' else 'negative' if signal == 'sell' else 'flat'} with the "
         f"last close at {recent[-1]:.2f}."
     )
+    strategy_id = training.get("payload", {}).get("strategyId") or training.get("strategy_id")
     return {
         "symbol": payload.symbol.upper(),
-        "strategyId": training["payload"].get("strategyId", training["strategy_id"]),
+        "strategyId": strategy_id,
         "signal": signal,
         "confidence": confidence,
         "summary": summary,
