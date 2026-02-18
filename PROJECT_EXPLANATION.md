@@ -28,8 +28,14 @@ The platform is organized into four main functional areas:
 *   **Data Integration:** Developed a robust abstraction layer for Yahoo Finance, ensuring the app remains functional even if external APIs face rate limits or latency issues.
 *   **Security:** Implemented Bearer token authentication with bcrypt password hashing to secure user sessions and simulation data.
 
-### **Database & Persistence**
-*   **Dual-Store Architecture:** Designed a flexible persistence layer that supports both **MongoDB** (via `motor` for async I/O) and an **In-Memory Store**. This allowed for rapid development/testing without dependency on a live database.
+### Database & Persistence (The Role of MongoDB)
+*   **Primary Persistence Layer:** MongoDB serves as the source of truth for all user-generated data, including authentication credentials, active sessions, and historical trading simulations.
+*   **Asynchronous Integration:** Used the `motor` library (an async MongoDB driver) to ensure database operations are non-blocking. This is critical for maintaining high concurrency in the FastAPI backend, especially when multiple users are running backtests simultaneously.
+*   **Document-Oriented Flexibility:**
+    *   **Simulations:** Stored as flexible documents, allowing for different strategy parameters (like `shortWindow` vs `lookback`) without rigid schema migrations.
+    *   **Trained Models:** Results of strategy training (metrics, sample price series) are stored as nested documents, making it efficient to retrieve a complete "snapshot" of a strategy's performance in a single query.
+*   **Security & Isolation:** Implemented user-level data isolation by indexing collections on `userId` (stored as `ObjectId`). Every query is scoped to the authenticated user's ID to prevent cross-account data leaks.
+*   **Dual-Store Architecture:** Designed a flexible persistence layer that supports both **MongoDB** and an **In-Memory Store**. This allowed for rapid development/testing without dependency on a live database.
 *   **Thread-Safe In-Memory Store:** Implemented `asyncio.Lock` in the in-memory implementation to ensure data consistency and prevent race conditions during concurrent requests, mimicking the ACID properties of a real database.
 
 ---

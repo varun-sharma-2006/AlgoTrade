@@ -17,7 +17,8 @@ This guide provides a structured flow for presenting your project during an inte
 
 ## 3. Technical Deep Dive (5:00 - 10:00)
 *   **Backend Architecture:** "The backend is built with an asynchronous architecture. I used **Motor** for non-blocking MongoDB interactions, which is crucial when you're fetching market data and generating AI responses simultaneously."
-*   **Data Abstraction:** "I'm particularly proud of the data store abstraction. I implemented a `BaseStore` interface (using Python's type hinting) so the app can switch between **MongoDB** and an **In-Memory** store via environment variables. This made my testing and local development incredibly fast."
+*   **MongoDB as a Document Store:** "I chose MongoDB because of its schema flexibility. In a trading app, different strategies (like SMA Crossover vs. RSI Mean Reversion) have different parameters. MongoDB's document model allowed me to store these diverse data structures without complex table joins or rigid migrations."
+*   **Data Abstraction:** "I'm particularly proud of the data store abstraction. I implemented a modular `MongoStore` class so the app can switch between **MongoDB** and an **In-Memory** store via environment variables. This made my testing and local development incredibly fast while keeping the production code clean."
 *   **Quantitative Logic:** "I wrote the backtesting logic from scratch in Python rather than using a heavy library. This allowed me to fine-tune the performance calculations—like the annualized return and volatility—ensuring they match industry standards."
 *   **Type Safety:** "On the frontend, TypeScript was essential. By sharing types between the backend and frontend, I eliminated a whole class of 'undefined' errors that usually happen when dealing with complex API responses."
 
