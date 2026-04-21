@@ -1,4 +1,4 @@
-# Algo Trade Simulator
+# Algorithmic Trading Simulator
 
 **Algo Trade Simulator** is a full-stack algorithmic trading platform that empowers users to backtest, simulate, and analyze quantitative trading strategies using live market data. It combines a powerful Python and FastAPI backend with a responsive React and TypeScript frontend to deliver a seamless, feature-rich experience.
 
