@@ -1,4 +1,4 @@
-import { defineConfig } from "vite";
+import { defineConfig } from "vitest/config";
 import react from "@vitejs/plugin-react";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -21,5 +21,9 @@ export default defineConfig({
   build: {
     outDir: resolve(__dirname, "dist"),
     emptyOutDir: true,
+  },
+  test: {
+    environment: "jsdom",
+    setupFiles: [resolve(__dirname, "client", "src", "__tests__", "setup.ts")],
   },
 });

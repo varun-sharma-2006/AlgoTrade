@@ -401,6 +401,35 @@ main {
   color: rgba(226, 232, 240, 0.65);
 }
 
+.equity-curve {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin: 0.75rem 0;
+}
+
+.trades-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 1rem;
+  font-size: 0.85rem;
+}
+
+.trades-table th,
+.trades-table td {
+  text-align: left;
+  padding: 0.4rem 0.25rem;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.15);
+}
+
+.trades-table .positive {
+  color: #4ade80;
+}
+
+.trades-table .negative {
+  color: #f87171;
+}
+
 .chatbot {
   display: flex;
   flex-direction: column;

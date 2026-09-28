@@ -55,26 +55,47 @@ export interface OverviewResponse {
 export interface StrategyMetrics {
   totalReturn: number;
   annualizedReturn: number;
+  buyHoldReturn: number;
+  excessReturn: number;
   winRate: number;
   trades: number;
+  closedTrades: number;
+  avgTradeReturn: number;
   sharpe: number;
   maxDrawdown: number;
+  exposure: number;
+  feeBps: number;
 }
+
+export type StrategyId = "sma-crossover" | "mean-reversion" | "trend-follow";
 
 export interface TrainingPayload {
   symbol: string;
-  shortWindow: number;
-  longWindow: number;
-  strategyId?: string;
+  strategyId: StrategyId;
+  shortWindow?: number;
+  longWindow?: number;
+  lookback?: number;
+  deviation?: number;
+  channel?: number;
+}
+
+export interface BacktestTrade {
+  entryDate: string;
+  entryPrice: number;
+  exitDate: string;
+  exitPrice: number;
+  return: number;
 }
 
 export interface TrainingResult {
   symbol: string;
-  strategyId: string;
-  shortWindow: number;
-  longWindow: number;
+  strategyId: StrategyId;
+  parameters: Record<string, number>;
   metrics: StrategyMetrics;
-  sample: Array<{ timestamp: string; close: number; shortSma: number; longSma: number }>;
+  trades: BacktestTrade[];
+  openTrade: BacktestTrade | null;
+  sample: Array<{ timestamp: string; close: number; equity: number; position: number } & Record<string, number | string>>;
+  period: { start: string; end: string; days: number };
   trainedAt: string;
 }
 

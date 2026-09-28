@@ -5,6 +5,8 @@ interface SparklineChartProps {
 }
 
 export function SparklineChart({ points }: SparklineChartProps) {
+  // Hooks must run on every render, so this stays above the early return.
+  const gradientId = useMemo(() => `sparkline-gradient-${Math.random().toString(36).slice(2)}`, []);
   if (!points.length) {
     return null;
   }
@@ -16,7 +18,6 @@ export function SparklineChart({ points }: SparklineChartProps) {
   const max = Math.max(...values);
   const range = max - min || 1;
   const step = width / Math.max(points.length - 1, 1);
-  const gradientId = useMemo(() => `sparkline-gradient-${Math.random().toString(36).slice(2)}`, []);
 
   const projectY = (value: number) => height - ((value - min) / range) * height;
   const linePath = points
