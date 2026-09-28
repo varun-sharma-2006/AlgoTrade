@@ -256,6 +256,13 @@ main {
   overflow-y: auto;
 }
 
+/* Pages rendered inside the sidebar layout fill the content column instead of the viewport. */
+.content main {
+  width: auto;
+  margin: 0;
+  padding: 0;
+}
+
 .splash {
   display: flex;
   align-items: center;
@@ -429,6 +436,14 @@ main {
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
+}
+
+/* Bubble text reuses the "content" class name; undo the page-layout styles it would inherit. */
+.bubble .content {
+  flex: initial;
+  padding: 0;
+  overflow: visible;
+  white-space: pre-wrap;
 }
 
 .bubble.user {

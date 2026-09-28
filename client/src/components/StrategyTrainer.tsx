@@ -14,7 +14,7 @@ function MetricRow({ label, value, suffix = "" }: { label: string; value: number
     <li>
       <span>{label}</span>
       <strong>
-        {Number.isFinite(value) ? value.toFixed(2) : "–"}
+        {Number.isFinite(value) ? value.toFixed(2) : "â€“"}
         {suffix}
       </strong>
     </li>
@@ -27,7 +27,7 @@ function Metrics({ metrics }: { metrics: StrategyMetrics }) {
       <MetricRow label="Total return" value={metrics.totalReturn * 100} suffix="%" />
       <MetricRow label="Annualised return" value={metrics.annualizedReturn * 100} suffix="%" />
       <MetricRow label="Win rate" value={metrics.winRate * 100} suffix="%" />
-      <MetricRow label="Sharp ratio" value={metrics.sharpe} />
+      <MetricRow label="Sharpe ratio" value={metrics.sharpe} />
       <MetricRow label="Max drawdown" value={metrics.maxDrawdown * 100} suffix="%" />
       <li>
         <span>Trades</span>
@@ -99,7 +99,7 @@ export function StrategyTrainer({ onTrain, onPredict, training, prediction, load
           <div className="summary">
             <strong>{training.symbol}</strong>
             <span className="subtle">
-              {training.strategyId} · windows {training.shortWindow}/{training.longWindow}
+              {training.strategyId} Â· windows {training.shortWindow}/{training.longWindow}
             </span>
             <span className="subtle">Trained {new Date(training.trainedAt).toLocaleString()}</span>
           </div>
@@ -111,9 +111,9 @@ export function StrategyTrainer({ onTrain, onPredict, training, prediction, load
 
       {prediction ? (
         <div className="prediction">
-          <strong>Latest signal · {prediction.symbol}</strong>
+          <strong>Latest signal Â· {prediction.symbol}</strong>
           <p>{prediction.summary}</p>
-          <span className="subtle">Signal: {prediction.signal.toUpperCase()} · Confidence {Math.round(prediction.confidence * 100)}%</span>
+          <span className="subtle">Signal: {prediction.signal.toUpperCase()} Â· Confidence {Math.round(prediction.confidence * 100)}%</span>
         </div>
       ) : null}
     </section>

@@ -29,6 +29,14 @@ Whether you're a seasoned quant or just beginning to explore the world of algori
 - A running MongoDB instance (Atlas or local)
 - A Google Gemini API key
 
+### Quick start (Windows)
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\start.ps1
+```
+
+This installs dependencies on first run, creates dev `.env` files (in-memory database + login bypass) if missing, and opens the backend and frontend in their own windows.
+
 ### Setup
 
 #### Backend
@@ -91,9 +99,9 @@ The backend recognises the following environment variables:
 | `ENABLE_DEV_ENDPOINTS` | Enables development-only routes such as the login bypass helper | `false` |
 | `USE_IN_MEMORY_DB` | Stores users, sessions, and simulations in memory for local testing (no MongoDB required) | `false` |
 | `YAHOO_USER_AGENT` | Optional override for the header sent to Yahoo Finance endpoints | `Mozilla/5.0 (compatible; AlgoTradeSimulator/1.0; +https://example.com)` |
-| `OLLAMA_URL` | Base URL for the local Ollama service | `http://localhost:11434` |
-| `OLLAMA_MODEL` | Ollama model alias to use for chat completions | `mistral` |
-| `OLLAMA_TIMEOUT_SECONDS` | Timeout (seconds) for Ollama responses | `30` |
+| `GEMINI_MODELS` | Comma-separated Gemini models tried in order for the chatbot; if all fail, a local market-data reply is returned | `gemini-3.5-flash,gemini-3.1-flash-lite,gemini-3.5-flash-lite,gemini-flash-latest` |
+
+> Values in `backend/.env` override variables already set in your system environment.
 
 > **Tip:** When deploying, supply a production MongoDB connection string and set `FRONTEND_ORIGIN` to your hosted frontend URL.
 

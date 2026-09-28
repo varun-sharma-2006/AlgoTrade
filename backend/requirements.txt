@@ -12,3 +12,4 @@ yfinance==0.2.66
 google-generativeai==0.4.0
 pytest
 pytest-asyncio
+httpx

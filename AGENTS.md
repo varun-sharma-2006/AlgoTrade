@@ -5,4 +5,4 @@
 - Run `python -m compileall backend` after editing the FastAPI backend.
 - When you point the backend at a new MongoDB instance, optionally run `python test.py` to confirm connectivity.
 
-- Confirm the local Ollama service is running (or mock responses) before testing chatbot interactions.
+- The chatbot uses Gemini (`GOOGLE_API_KEY`, `GEMINI_MODELS`) and falls back to a local reply when no model responds.

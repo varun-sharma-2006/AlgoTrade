@@ -10,7 +10,6 @@ import logging
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
-import google.generativeai as genai
 import requests
 
 try:
@@ -19,12 +18,16 @@ except ModuleNotFoundError:
     yf = None
 
 from bson import ObjectId
+from dotenv import load_dotenv
 from motor.motor_asyncio import AsyncIOMotorClient, AsyncIOMotorDatabase
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Response, status
 from fastapi.middleware.cors import CORSMiddleware
 from passlib.context import CryptContext
 from pydantic import BaseModel, EmailStr, Field
+
+# backend/.env wins over stale machine-level variables so local config is predictable.
+load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env"), override=True)
 
 TRUTHY_ENV_VALUES = {"1", "true", "yes", "on"}
 WATCHLIST_SYMBOLS = ["AAPL", "MSFT", "GOOGL", "AMZN", "TSLA", "NVDA"]
@@ -133,6 +136,15 @@ class Settings(BaseModel):
     google_api_key: Optional[str] = Field(default_factory=lambda: os.getenv("GOOGLE_API_KEY"))
     mongo_uri: str = Field(default_factory=resolve_mongo_uri)
     mongo_db_name: str = Field(default_factory=get_database_name)
+    gemini_models: List[str] = Field(
+        default_factory=lambda: [
+            name.strip()
+            for name in os.getenv(
+                "GEMINI_MODELS", "gemini-3.5-flash,gemini-3.1-flash-lite,gemini-3.5-flash-lite,gemini-flash-latest"
+            ).split(",")
+            if name.strip()
+        ]
+    )
     yahoo_user_agent: str = Field(
         default_factory=lambda: os.getenv(
             "YAHOO_USER_AGENT",
@@ -218,13 +230,17 @@ async def get_db() -> AsyncIOMotorDatabase:
 
 @app.on_event("startup")
 async def on_startup() -> None:
+    if settings.use_in_memory_db:
+        logger.info("Using in-memory store")
+        app.state.store = InMemoryStore()
+        return
     logger.info("Connecting to MongoDB at %s", settings.mongo_uri)
     app.state.store = MongoStore(settings.mongo_uri, settings.mongo_db_name)
 
 
 @app.on_event("shutdown")
 async def on_shutdown() -> None:
-    if app.state.store:
+    if isinstance(app.state.store, MongoStore):
         await app.state.store.close()
 
 
@@ -430,16 +446,7 @@ class InMemoryStore:
             return [item for item in self.trained.values() if item["user_id"] == user_id]
 
 
-store: InMemoryStore | MongoStore = InMemoryStore() if settings.use_in_memory_db else None
-
-
-async def get_current_user(authorization: str = Header(""), store_param=Depends(get_db)) -> Dict[str, Any]:
-    global store
-    if settings.use_in_memory_db and not store:
-        store = InMemoryStore()
-    elif not settings.use_in_memory_db and not store:
-        store = store_param
-
+async def get_current_user(authorization: str = Header(""), store: InMemoryStore | MongoStore = Depends(get_db)) -> Dict[str, Any]:
     if not authorization.lower().startswith("bearer "):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing bearer token")
     token = authorization.split(" ", 1)[1]
@@ -542,7 +549,7 @@ def compute_drawdown(values: List[float]) -> float:
         drawdown = (price - peak) / peak if peak else 0
         if drawdown < max_drawdown:
             max_drawdown = drawdown
-    return abs(max_drawdown) * 100
+    return abs(max_drawdown)
 
 
 INVESTMENT_PROMPT_RE = re.compile(r"which stock should i invest in", re.IGNORECASE)
@@ -605,6 +612,71 @@ def build_investment_reply(message: str) -> Dict[str, Any]:
     )
     reply = "\n".join(lines)
     return {"reply": reply, "citations": citations}
+
+
+CHAT_SYSTEM_PROMPT = (
+    "You are a helpful assistant for an algorithmic trading simulator. "
+    "Your expertise is in stocks, portfolio management, and algorithmic trading strategies. "
+    "When providing advice, always remind the user that your insights are for educational purposes and "
+    "that they should conduct their own research before making any investment decisions."
+)
+TICKER_RE = re.compile(r"\b[A-Z]{1,5}(?:\.[A-Z]{1,2})?\b")
+TICKER_STOPWORDS = {"I", "A", "AI", "SMA", "EMA", "RSI", "MACD", "ETF", "USD", "INR", "OK", "US", "IPO", "CEO", "PE"}
+
+
+def ask_gemini(payload: ChatRequest) -> Optional[str]:
+    """Try each configured Gemini model in turn; return None if none of them answer."""
+    if not settings.google_api_key:
+        return None
+    contents = [
+        {"role": "model" if item.role in {"assistant", "model"} else "user", "parts": [{"text": item.content}]}
+        for item in payload.history[-10:]
+        if item.content.strip()
+    ]
+    while contents and contents[0]["role"] == "model":
+        contents.pop(0)
+    contents.append({"role": "user", "parts": [{"text": payload.message}]})
+    body = {"systemInstruction": {"parts": [{"text": CHAT_SYSTEM_PROMPT}]}, "contents": contents}
+    for model_name in settings.gemini_models:
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent"
+        try:
+            response = requests.post(
+                url, json=body, headers={"x-goog-api-key": settings.google_api_key}, timeout=25
+            )
+            response.raise_for_status()
+            parts = response.json()["candidates"][0]["content"]["parts"]
+            text = "".join(part.get("text", "") for part in parts).strip()
+            if text:
+                return text
+        except Exception as exc:  # quota, overload, network, or malformed response
+            logger.warning("Gemini model %s failed: %s", model_name, str(exc)[:200])
+    return None
+
+
+def build_offline_reply(message: str) -> Dict[str, Any]:
+    """Local answer used when no Gemini model is reachable."""
+    symbols = [sym for sym in dict.fromkeys(TICKER_RE.findall(message)) if sym not in TICKER_STOPWORDS][:5]
+    lines = ["The AI model is unavailable right now (quota or high demand), so here is a quick local read."]
+    citations: List[str] = []
+    quotes = fetch_quotes(symbols) if symbols else []
+    if quotes:
+        lines.append("")
+        for quote in quotes:
+            change = quote.get("changePercent")
+            change_str = f" ({change:+.2f}% today)" if isinstance(change, (int, float)) else ""
+            lines.append(f"- {quote['symbol']}: {quote['price']:.2f} {quote.get('currency') or ''}{change_str}")
+            citations.append(f"https://finance.yahoo.com/quote/{quote['symbol']}")
+        lines.append("")
+        lines.append("Train an SMA crossover on these symbols in the Strategy trainer to see how momentum has behaved.")
+    else:
+        lines.append("")
+        lines.append(
+            "Try mentioning a ticker (e.g. AAPL, MSFT) for live prices, or ask \"which stock should I invest in with 1000 for 5 days\" "
+            "for a sample allocation. The SMA crossover trainer backtests short vs long moving-average signals on real history."
+        )
+    lines.append("")
+    lines.append("This is educational insight, not investment advice.")
+    return {"reply": "\n".join(lines), "citations": citations, "actions": []}
 
 
 @app.post("/auth/signup")
@@ -861,10 +933,6 @@ async def remove_simulation(
 async def train_strategy(
     payload: TrainingPayload, user: Dict[str, Any] = Depends(get_current_user), store: MongoStore = Depends(get_db)
 ) -> Dict[str, Any]:
-    if settings.use_in_memory_db:
-        # Simplified in-memory path for brevity
-        return await app.state.store.record_training(user["id"], payload.symbol, "sma-crossover", {})
-
     if payload.shortWindow >= payload.longWindow:
         raise HTTPException(status_code=422, detail="shortWindow must be less than longWindow")
     chart = fetch_chart(payload.symbol, range_value="6mo", interval="1d")
@@ -916,6 +984,10 @@ async def train_strategy(
         "sample": sample,
         "trainedAt": now().isoformat(),
     }
+
+    if settings.use_in_memory_db:
+        await app.state.store.record_training(user["id"], payload.symbol, strategy_id, result)
+        return result
 
     doc = {
         "userId": ObjectId(user["id"]),
@@ -971,28 +1043,12 @@ async def predict(
 @app.post("/chat")
 async def chat(payload: ChatRequest, user: Dict[str, Any] = Depends(get_current_user)) -> Dict[str, Any]:
     _ = user
-    if not settings.google_api_key:
-        raise HTTPException(status_code=501, detail="Chatbot API key is not configured")
-
-    genai.configure(api_key=settings.google_api_key)
-    model = genai.GenerativeModel("gemini-pro-latest")
-
     if INVESTMENT_PROMPT_RE.search(payload.message):
         return build_investment_reply(payload.message)
 
-    system_prompt = (
-        "You are a helpful assistant for an algorithmic trading simulator. "
-        "Your expertise is in stocks, portfolio management, and algorithmic trading strategies. "
-        "When providing advice, always remind the user that your insights are for educational purposes and "
-        "that they should conduct their own research before making any investment decisions."
-    )
-
-    try:
-        response = model.generate_content(f"{system_prompt}\n\nUser query: {payload.message}")
-        reply = response.text
-    except Exception as exc:
-        logger.error(f"Gemini API error: {exc}")
-        raise HTTPException(status_code=502, detail="Error communicating with the chatbot service") from exc
+    reply = await asyncio.to_thread(ask_gemini, payload)
+    if reply is None:
+        return await asyncio.to_thread(build_offline_reply, payload.message)
 
     disclaimer = (
         "\n\nDisclaimer: I am a chatbot. All decisions should not be made solely on my response. "

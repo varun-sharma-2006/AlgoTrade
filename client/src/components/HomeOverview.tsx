@@ -52,31 +52,31 @@ export function HomeOverview({
       <div className="stats-grid">
         <div className="stat-card">
           <span className="label">Total simulations</span>
-          <strong className="value">{totals ? totals.totalSimulations : "–"}</strong>
+          <strong className="value">{totals ? totals.totalSimulations : "â€“"}</strong>
         </div>
         <div className="stat-card">
           <span className="label">Active</span>
-          <strong className="value">{totals ? totals.activeSimulations : "–"}</strong>
+          <strong className="value">{totals ? totals.activeSimulations : "â€“"}</strong>
         </div>
         <div className="stat-card">
           <span className="label">Completed</span>
-          <strong className="value">{totals ? totals.completedSimulations : "–"}</strong>
+          <strong className="value">{totals ? totals.completedSimulations : "â€“"}</strong>
         </div>
         <div className="stat-card">
           <span className="label">Avg. starting capital</span>
           <strong className="value">
-            {totals ? `$${formatNumber(totals.averageStartingCapital, { maximumFractionDigits: 0 })}` : "–"}
+            {totals ? `$${formatNumber(totals.averageStartingCapital, { maximumFractionDigits: 0 })}` : "â€“"}
           </strong>
         </div>
         <div className="stat-card">
           <span className="label">Capital allocated</span>
           <strong className="value">
-            {totals ? `$${formatNumber(totals.totalStartingCapital, { maximumFractionDigits: 0 })}` : "–"}
+            {totals ? `$${formatNumber(totals.totalStartingCapital, { maximumFractionDigits: 0 })}` : "â€“"}
           </strong>
         </div>
         <div className="stat-card">
           <span className="label">Trained models</span>
-          <strong className="value">{totals ? totals.trainedModels : "–"}</strong>
+          <strong className="value">{totals ? totals.trainedModels : "â€“"}</strong>
         </div>
       </div>
 
@@ -95,7 +95,7 @@ export function HomeOverview({
                   <li key={symbol}>
                     <div>
                       <strong>{symbol}</strong>
-                      <span className="subtle">{latest ? `$${latest.toFixed(2)}` : "–"}</span>
+                      <span className="subtle">{latest ? `$${latest.toFixed(2)}` : "â€“"}</span>
                     </div>
                     <SparklineChart points={sparkline?.points ?? []} />
                   </li>

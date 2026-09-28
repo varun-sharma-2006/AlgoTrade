@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   createSimulation,
   deleteSimulation,
@@ -99,8 +99,9 @@ export default function App() {
   });
   const loginBypassEnabled = LOGIN_BYPASS_ENABLED || bypassRequestedFromPath;
   const [initializingBypass, setInitializingBypass] = useState(loginBypassEnabled);
-  const [bypassInProgress, setBypassInProgress] = useState(false);
+  const bypassInProgressRef = useRef(false);
   const [bypassFailed, setBypassFailed] = useState(false);
+  const [bypassDismissed, setBypassDismissed] = useState(false);
 
   const bypassPayload = useMemo<DevAuthBypassPayload | undefined>(() => {
     const email = LOGIN_BYPASS_EMAIL?.trim();
@@ -114,7 +115,7 @@ export default function App() {
     };
   }, []);
 
-  const shouldAttemptBypass = loginBypassEnabled && !bypassFailed && !token && !user;
+  const shouldAttemptBypass = loginBypassEnabled && !bypassFailed && !bypassDismissed && !token && !user;
 
   useEffect(() => {
     const stored = window.localStorage.getItem("algo-trade-session");
@@ -256,34 +257,28 @@ export default function App() {
       return;
     }
 
+    if (bypassInProgressRef.current) {
+      return;
+    }
+
     if (!shouldAttemptBypass) {
       setInitializingBypass(false);
       return;
     }
 
-    if (bypassInProgress) {
-      return;
-    }
-
-    setBypassInProgress(true);
+    // A ref (not state) guards the request so re-renders and StrictMode's double effect
+    // don't cancel the in-flight login and leave the app stuck on "Signing you in...".
+    bypassInProgressRef.current = true;
     setInitializingBypass(true);
     setError(null);
     setLoading(true);
 
-    let cancelled = false;
-
     const run = async () => {
       try {
         const response = await devAuthBypass(bypassPayload);
-        if (cancelled) {
-          return;
-        }
         setBypassFailed(false);
         handleAuthSuccess(response);
       } catch (bypassError) {
-        if (cancelled) {
-          return;
-        }
         console.error(bypassError);
         setBypassFailed(true);
         setError(
@@ -292,20 +287,14 @@ export default function App() {
             : "Login bypass is unavailable. Please sign in manually.",
         );
       } finally {
-        if (!cancelled) {
-          setLoading(false);
-          setBypassInProgress(false);
-          setInitializingBypass(false);
-        }
+        bypassInProgressRef.current = false;
+        setLoading(false);
+        setInitializingBypass(false);
       }
     };
 
     void run();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [loginBypassEnabled, shouldAttemptBypass, bypassInProgress, bypassPayload, handleAuthSuccess]);
+  }, [loginBypassEnabled, shouldAttemptBypass, bypassPayload, handleAuthSuccess]);
 
   const handleCreateSimulation = useCallback(
     async (payload: SimulationInput) => {
@@ -420,7 +409,7 @@ export default function App() {
     [token],
   );
 
-  const handleLogout = useCallback(() => {
+  const resetSession = useCallback(() => {
     setToken(null);
     setUser(null);
     setSimulations([]);
@@ -433,6 +422,12 @@ export default function App() {
     setView("login");
   }, []);
 
+  // An explicit logout stops the dev bypass from signing the user straight back in.
+  const handleLogout = useCallback(() => {
+    setBypassDismissed(true);
+    resetSession();
+  }, [resetSession]);
+
   const handleAuthFailure = useCallback((issue: unknown) => {
     if (issue && typeof issue === "object" && "status" in (issue as { status?: number })) {
       const status = (issue as { status?: number }).status;
@@ -440,13 +435,13 @@ export default function App() {
         if (typeof window !== "undefined") {
           window.localStorage.removeItem("algo-trade-session");
         }
-        handleLogout();
+        resetSession();
         setError("Session expired. Please sign in again.");
         return true;
       }
     }
     return false;
-  }, [handleLogout]);
+  }, [resetSession]);
 
   const handleSearchSymbols = useCallback(
     async (query: string) => {
