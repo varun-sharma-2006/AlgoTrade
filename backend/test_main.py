@@ -1,11 +1,13 @@
-import pytest
-import pytest_asyncio
-from backend.main import MongoStore, now
+import asyncio
 import secrets
 from datetime import timedelta
-import asyncio
 from unittest.mock import AsyncMock
+
+import pytest
+import pytest_asyncio
 from bson import ObjectId
+
+from backend.main import MongoStore, now
 
 
 @pytest.fixture(scope="module")
@@ -90,6 +92,7 @@ async def test_get_overview_endpoint(store: MongoStore):
     )
 
     from fastapi.testclient import TestClient
+
     from backend.main import app, get_current_user, get_db
 
     async def override_get_current_user():
