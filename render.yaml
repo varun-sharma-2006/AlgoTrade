@@ -1,0 +1,38 @@
+# One-click deploy on Render: Dashboard -> New -> Blueprint -> pick this repo.
+# The demo API uses the in-memory store (data resets on restart); point MONGO_URL at MongoDB Atlas
+# and set USE_IN_MEMORY_DB=false for persistence. If Render assigns different URLs, update the two
+# cross-references below (FRONTEND_ORIGIN and VITE_API_BASE_URL).
+services:
+  - type: web
+    name: algotrade-api
+    runtime: python
+    plan: free
+    buildCommand: pip install -r backend/requirements.txt
+    startCommand: uvicorn backend.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.7
+      - key: USE_IN_MEMORY_DB
+        value: "true"
+      - key: ENABLE_DEV_ENDPOINTS
+        value: "true"
+      - key: FRONTEND_ORIGIN
+        value: https://algotrade-web.onrender.com
+      - key: GOOGLE_API_KEY
+        sync: false
+
+  - type: web
+    name: algotrade-web
+    runtime: static
+    buildCommand: npm ci && npm run build
+    staticPublishPath: dist
+    envVars:
+      - key: VITE_API_BASE_URL
+        value: https://algotrade-api.onrender.com
+      - key: VITE_ENABLE_LOGIN_BYPASS
+        value: "true"
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html

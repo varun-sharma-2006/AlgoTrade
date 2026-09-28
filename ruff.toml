@@ -1,0 +1,10 @@
+line-length = 120
+target-version = "py311"
+extend-exclude = ["backend/.venv", "node_modules"]
+
+[lint]
+select = ["E", "F", "W", "I", "B", "UP"]
+ignore = [
+  "B008",  # FastAPI's Depends() in argument defaults is idiomatic
+  "E501",  # line length is handled by `ruff format`; long prose strings are left intact
+]

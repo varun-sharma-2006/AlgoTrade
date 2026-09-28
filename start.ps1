@@ -15,13 +15,12 @@ if (-not (Test-Path (Join-Path $root "node_modules"))) {
     Push-Location $root; npm install; Pop-Location
 }
 
-$backendEnv = Join-Path $root "backend\.env"
-if (-not (Test-Path $backendEnv)) {
-    "USE_IN_MEMORY_DB=true`nENABLE_DEV_ENDPOINTS=true" | Set-Content $backendEnv
-}
-$clientEnv = Join-Path $root "client\.env"
-if (-not (Test-Path $clientEnv)) {
-    "VITE_ENABLE_LOGIN_BYPASS=true" | Set-Content $clientEnv
+foreach ($dir in "backend", "client") {
+    $envFile = Join-Path $root "$dir\.env"
+    if (-not (Test-Path $envFile)) {
+        Copy-Item (Join-Path $root "$dir\.env.example") $envFile
+        Write-Host "Created $dir\.env from $dir\.env.example"
+    }
 }
 
 # Free the ports in case a previous run is still holding them.

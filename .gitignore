@@ -1,14 +1,26 @@
+# Dependencies
 node_modules
-.dist
-.dist/**
-dist
-.env
-.env.*
-__pycache__/
-*.py[cod]
-*.pyc
 backend/.venv
 backend/venv
+
+# Build output
+dist
+.dist
+
+# Environment (keep the templates)
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+
+# Logs and editor files
+*.log
 .idea/
+.vscode/
 .DS_Store
 attached_assets

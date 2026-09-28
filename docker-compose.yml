@@ -1,0 +1,37 @@
+# Full stack with MongoDB: docker compose up --build
+# Frontend: http://localhost:8080   API: http://localhost:8000/docs
+services:
+  mongo:
+    image: mongo:7
+    volumes:
+      - mongo-data:/data/db
+
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    environment:
+      USE_IN_MEMORY_DB: "false"
+      MONGO_URL: mongodb://mongo:27017
+      ENABLE_DEV_ENDPOINTS: "true"
+      FRONTEND_ORIGIN: http://localhost:8080
+      GOOGLE_API_KEY: ${GOOGLE_API_KEY:-}
+    ports:
+      - "8000:8000"
+    depends_on:
+      - mongo
+
+  frontend:
+    build:
+      context: .
+      dockerfile: client/Dockerfile
+      args:
+        VITE_API_BASE_URL: http://localhost:8000
+        VITE_ENABLE_LOGIN_BYPASS: "true"
+    ports:
+      - "8080:80"
+    depends_on:
+      - backend
+
+volumes:
+  mongo-data:

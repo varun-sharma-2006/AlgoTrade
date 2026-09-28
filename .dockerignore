@@ -1,0 +1,13 @@
+.git
+node_modules
+dist
+backend/.venv
+**/__pycache__
+**/.pytest_cache
+**/.ruff_cache
+*.log
+# Local secrets must not end up in images (backend/.env would override compose settings).
+**/.env
+**/.env.*
+!**/.env.example
+docs
