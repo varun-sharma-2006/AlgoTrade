@@ -34,7 +34,8 @@ export function GoogleLoginPage({ clientId, onCredential, loading, error }: Goog
 
       <p className="privacy-note">
         Sign-in is verified by Google. When you sign in, your name, email address and profile photo are shared
-        with the owner of this app, who can see when you visited. Nothing else in your Google account is accessed.
+        with the owner of this app, who can see when you visited. Nothing else in your Google account is accessed.{" "}
+        <a href="/privacy.html">Privacy policy</a>
       </p>
     </div>
   );
