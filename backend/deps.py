@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 
 from fastapi import Depends, Header, HTTPException, Request, status
@@ -12,8 +13,10 @@ from backend.stores import Store
 
 async def get_db(request: Request) -> Store:
     store = getattr(request.app.state, "store", None)
-    if store is None:
-        # Serverless hosts (Vercel) and mounted sub-apps may never run the lifespan hook; create it on first use.
+    # Serverless hosts (Vercel) and mounted sub-apps may never run the lifespan hook, and may serve
+    # requests on a new event loop, which a Mongo client can't be reused across. Create it as needed.
+    stale_loop = isinstance(store, stores.MongoStore) and store.loop not in (None, asyncio.get_running_loop())
+    if store is None or stale_loop:
         store = request.app.state.store = stores.create_store()
     return store
 

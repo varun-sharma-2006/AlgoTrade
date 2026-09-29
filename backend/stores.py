@@ -53,6 +53,13 @@ def _session_expiry() -> datetime:
     return now() + timedelta(days=settings.session_duration_days)
 
 
+def _running_loop() -> asyncio.AbstractEventLoop | None:
+    try:
+        return asyncio.get_running_loop()
+    except RuntimeError:
+        return None
+
+
 def _b64(data: bytes) -> str:
     return base64.urlsafe_b64encode(data).rstrip(b"=").decode()
 
@@ -93,6 +100,8 @@ class MongoStore:
     def __init__(self, uri: str, database_name: str, client: AsyncIOMotorClient | None = None) -> None:
         self.client = client or AsyncIOMotorClient(uri, serverSelectionTimeoutMS=5000)
         self.db = self.client[database_name]
+        # Motor clients are tied to the event loop they were created on (see backend.deps.get_db).
+        self.loop = _running_loop()
 
     async def close(self) -> None:
         self.client.close()

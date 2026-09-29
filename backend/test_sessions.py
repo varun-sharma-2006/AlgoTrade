@@ -60,3 +60,33 @@ def test_predict_works_on_an_instance_that_never_saw_the_training(monkeypatch):
         assert response.status_code == 200 and response.json()["signal"] in {"buy", "hold", "sell", "wait"}
         bad = {"symbol": "AAPL", "strategyId": "sma-crossover", "parameters": {"shortWindow": 50}}
         assert client_b.post("/analytics/predict", headers=headers, json=bad).status_code == 422
+
+
+def test_mongo_store_is_recreated_on_a_new_event_loop(monkeypatch):
+    from types import SimpleNamespace
+
+    from mongomock_motor import AsyncMongoMockClient
+
+    from backend.deps import get_db
+
+    made = []
+
+    def fake_create():
+        made.append(stores.MongoStore("mongodb://test", "db", client=AsyncMongoMockClient()))
+        return made[-1]
+
+    monkeypatch.setattr(stores, "create_store", fake_create)
+    request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace()))
+
+    async def fetch():
+        return await get_db(request)
+
+    first = asyncio.run(fetch())
+    second = asyncio.run(fetch())  # asyncio.run always creates a new loop
+    assert first is not second and len(made) == 2
+
+    async def twice():
+        return await get_db(request), await get_db(request)
+
+    a, b = asyncio.run(twice())
+    assert a is b  # same loop: reused
