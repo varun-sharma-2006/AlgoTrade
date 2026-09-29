@@ -40,6 +40,6 @@ async def dev_auth_bypass(
 ) -> dict[str, Any]:
     if not settings.enable_dev_endpoints:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Dev endpoints are disabled")
-    email = (payload.email if payload and payload.email else "dev@example.com").lower()
-    name = payload.name if payload and payload.name else "Dev User"
+    email = (payload.email if payload and payload.email else "user@example.com").lower()
+    name = payload.name if payload and payload.name else "User"
     return await _session_response(store, await store.ensure_user(email, name))
