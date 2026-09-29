@@ -91,3 +91,20 @@ def test_admin_sees_visitors_and_others_cannot(client, google):
     assert [entry["email"] for entry in data["logins"]] == [ADMIN, "alice@gmail.com", "alice@gmail.com"]
     assert data["logins"][1]["userAgent"].endswith("Chrome/140")
     assert all(entry["provider"] == "google" for entry in data["logins"])
+
+
+def test_old_demo_and_password_sessions_stop_working_when_google_is_enabled(client, monkeypatch):
+    # Before Google is configured: the shared demo login and a password account both work.
+    monkeypatch.setattr(settings, "enable_dev_endpoints", True)
+    demo = client.post("/dev/auth/bypass")
+    signup = client.post("/auth/signup", json={"email": "old@example.com", "password": "secret123", "name": "Old"})
+    for response in (demo, signup):
+        assert client.get("/simulations", headers=bearer(response)).status_code == 200
+
+    # Turning Google on invalidates them, while Google sessions work.
+    monkeypatch.setattr(settings, "google_client_id", "test-client.apps.googleusercontent.com")
+    monkeypatch.setattr(google_signin, "verify_credential", fake_verify)
+    for response in (demo, signup):
+        assert client.get("/simulations", headers=bearer(response)).status_code == 401
+    google_session = sign_in(client, "good-token-alice-000000")
+    assert client.get("/simulations", headers=bearer(google_session)).status_code == 200

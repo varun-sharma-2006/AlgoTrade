@@ -23,7 +23,7 @@ async def _signed_in(
     store: Store, user: dict[str, Any], request: Request, provider: str, picture: str | None = None
 ) -> dict[str, Any]:
     await store.record_login(user, picture, provider, request.headers.get("user-agent"))
-    session = await store.create_session(user["id"])
+    session = await store.create_session(user["id"], provider)
     return {"token": session["token"], "user": _with_role(user | ({"picture": picture} if picture else {}))}
 
 

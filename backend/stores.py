@@ -101,6 +101,12 @@ def verify_token(token: str) -> dict[str, Any] | None:
     return claims
 
 
+def session_allowed(provider: str | None) -> bool:
+    """Once Sign in with Google is on, only Google sessions count: sessions from the old shared demo
+    login or password accounts (including ones created before providers were recorded) are rejected."""
+    return not settings.google_client_id or provider == "google"
+
+
 def _object_id(value: str) -> ObjectId:
     try:
         return ObjectId(value)
@@ -160,10 +166,12 @@ class MongoStore:
             return _public_user(doc)
         return await self.create_user(email, name, secrets.token_urlsafe(12))
 
-    async def create_session(self, user_id: str) -> dict[str, Any]:
+    async def create_session(self, user_id: str, provider: str = "password") -> dict[str, Any]:
         token = secrets.token_urlsafe(32)
         expiry = _session_expiry()
-        await self.sessions.insert_one({"_id": token, "user_id": ObjectId(user_id), "expires_at": expiry})
+        await self.sessions.insert_one(
+            {"_id": token, "user_id": ObjectId(user_id), "expires_at": expiry, "provider": provider}
+        )
         return {"token": token, "expires_at": expiry}
 
     async def resolve_token(self, token: str) -> dict[str, Any] | None:
@@ -173,7 +181,7 @@ class MongoStore:
         expires_at = session["expires_at"]
         if expires_at.tzinfo is None:
             expires_at = expires_at.replace(tzinfo=UTC)
-        if expires_at <= now():
+        if expires_at <= now() or not session_allowed(session.get("provider")):
             return None
         user = await self.db.users.find_one({"_id": session["user_id"]})
         return _public_user(user) if user else None
@@ -308,16 +316,22 @@ class InMemoryStore:
                 return _public_user(record)
             return self._add_user(email, name, secrets.token_urlsafe(12))
 
-    async def create_session(self, user_id: str) -> dict[str, Any]:
+    async def create_session(self, user_id: str, provider: str = "password") -> dict[str, Any]:
         async with self.lock:
             user = self.users_by_id[user_id]
         expiry = _session_expiry()
-        claims = {"sub": user_id, "email": user["email"], "name": user["name"], "exp": int(expiry.timestamp())}
+        claims = {
+            "sub": user_id,
+            "email": user["email"],
+            "name": user["name"],
+            "exp": int(expiry.timestamp()),
+            "prv": provider,
+        }
         return {"token": sign_token(claims), "expires_at": expiry}
 
     async def resolve_token(self, token: str) -> dict[str, Any] | None:
         claims = verify_token(token)
-        if not claims:
+        if not claims or not session_allowed(claims.get("prv")):
             return None
         async with self.lock:
             user = self.users_by_id.get(claims["sub"])
