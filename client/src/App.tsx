@@ -394,7 +394,11 @@ export default function App() {
       setLabLoading(true);
       setError(null);
       try {
-        const result = await predictStrategy(token, symbol);
+        const trained =
+          trainingResult && trainingResult.symbol === symbol.toUpperCase()
+            ? { strategyId: trainingResult.strategyId, parameters: trainingResult.parameters }
+            : undefined;
+        const result = await predictStrategy(token, symbol, trained);
         setPredictionResult(result);
       } catch (predictError) {
         if (handleAuthFailure(predictError)) {
@@ -406,7 +410,7 @@ export default function App() {
         setLabLoading(false);
       }
     },
-    [token],
+    [token, trainingResult],
   );
 
   const resetSession = useCallback(() => {

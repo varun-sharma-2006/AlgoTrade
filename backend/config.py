@@ -32,6 +32,8 @@ def _csv(value: str) -> list[str]:
 class Settings(BaseModel):
     frontend_origin: str = Field(default_factory=lambda: os.getenv("FRONTEND_ORIGIN", "http://localhost:5173"))
     session_duration_days: int = Field(default_factory=lambda: int(os.getenv("SESSION_DURATION_DAYS", "7")))
+    # Signs in-memory-store session tokens. Set a long random value in any shared deployment.
+    session_secret: str = Field(default_factory=lambda: os.getenv("SESSION_SECRET", "dev-only-insecure-session-secret"))
     enable_dev_endpoints: bool = Field(default_factory=lambda: env_flag("ENABLE_DEV_ENDPOINTS"))
     use_in_memory_db: bool = Field(default_factory=lambda: env_flag("USE_IN_MEMORY_DB"))
     google_api_key: str | None = Field(default_factory=lambda: os.getenv("GOOGLE_API_KEY"))

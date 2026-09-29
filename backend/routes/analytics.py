@@ -101,15 +101,26 @@ async def train_strategy(
 async def predict(
     payload: PredictionPayload, user: dict[str, Any] = Depends(get_current_user), store: Store = Depends(get_db)
 ) -> dict[str, Any]:
-    training = await store.get_training(user["id"], payload.symbol)
-    if not training:
-        raise HTTPException(status_code=404, detail="Train the strategy first")
-    trained = training.get("payload") or {}
-    strategy_id = trained.get("strategyId") or training.get("strategyId") or "sma-crossover"
-    params = trained.get("parameters") or {
-        "shortWindow": trained.get("shortWindow", 20),
-        "longWindow": trained.get("longWindow", 60),
-    }
+    if payload.strategyId and payload.parameters:
+        # The client says which strategy it trained, so this works on any server instance.
+        strategy_id, params = payload.strategyId, payload.parameters
+    else:
+        training = await store.get_training(user["id"], payload.symbol)
+        if not training:
+            raise HTTPException(status_code=404, detail="Train the strategy first")
+        trained = training.get("payload") or {}
+        strategy_id = trained.get("strategyId") or training.get("strategyId") or "sma-crossover"
+        params = trained.get("parameters") or {
+            "shortWindow": trained.get("shortWindow", 20),
+            "longWindow": trained.get("longWindow", 60),
+        }
+    problem = (
+        strategies.validate(strategy_id, params)
+        if set(params) >= set(PARAMS_BY_STRATEGY.get(strategy_id, ()))
+        else "Missing strategy parameters"
+    )
+    if problem:
+        raise HTTPException(status_code=422, detail=problem)
     chart = fetch_chart(payload.symbol, range_value="1y", interval="1d")
     closes = [point["close"] for point in chart["points"]]
     if len(closes) < strategies.warmup(strategy_id, params) + 2:

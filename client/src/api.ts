@@ -156,10 +156,15 @@ export function trainStrategy(token: string, payload: TrainingPayload) {
   return request<TrainingResult>("/analytics/train", { method: "POST", body: payload, token });
 }
 
-export function predictStrategy(token: string, symbol: string) {
+export function predictStrategy(
+  token: string,
+  symbol: string,
+  strategy?: { strategyId: string; parameters: Record<string, number> },
+) {
+  // Sending the strategy lets any server instance answer, even one that didn't run the backtest.
   return request<PredictionResult>("/analytics/predict", {
     method: "POST",
-    body: { symbol },
+    body: { symbol, ...strategy },
     token,
   });
 }

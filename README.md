@@ -148,6 +148,7 @@ override variables already set in your system environment.
 | `STATIC_DIR` | Serve a built frontend (`dist/`) from the API, for single-container deploys | unset |
 | `FRONTEND_ORIGIN` | Allowed CORS origin | `http://localhost:5173` |
 | `SESSION_DURATION_DAYS` | Session lifetime | `7` |
+| `SESSION_SECRET` | Signs session tokens for the in-memory store (so they work across serverless instances); set a long random value when deployed | a dev-only placeholder |
 | `YAHOO_USER_AGENT` | User agent for Yahoo Finance search requests | a generic browser string |
 
 Frontend variables live in `client/.env` (see [`client/.env.example`](client/.env.example)):

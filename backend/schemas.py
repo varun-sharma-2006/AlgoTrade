@@ -48,6 +48,9 @@ class TrainingPayload(BaseModel):
 
 class PredictionPayload(BaseModel):
     symbol: str = Field(min_length=1, max_length=20)
+    # Optional: the strategy to evaluate. Without it, the user's last trained strategy for the symbol is used.
+    strategyId: str | None = Field(default=None, max_length=60)
+    parameters: dict[str, float] | None = None
 
 
 class ChatHistoryItem(BaseModel):

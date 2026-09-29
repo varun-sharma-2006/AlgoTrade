@@ -6,6 +6,10 @@ Routes only talk to this interface, so they don't need to know which backend is 
 from __future__ import annotations
 
 import asyncio
+import base64
+import hashlib
+import hmac
+import json
 import secrets
 import uuid
 from datetime import UTC, datetime, timedelta
@@ -47,6 +51,35 @@ def _public_user(record: dict[str, Any]) -> dict[str, Any]:
 
 def _session_expiry() -> datetime:
     return now() + timedelta(days=settings.session_duration_days)
+
+
+def _b64(data: bytes) -> str:
+    return base64.urlsafe_b64encode(data).rstrip(b"=").decode()
+
+
+def _unb64(text: str) -> bytes:
+    return base64.urlsafe_b64decode(text + "=" * (-len(text) % 4))
+
+
+def sign_token(claims: dict[str, Any]) -> str:
+    body = _b64(json.dumps(claims, separators=(",", ":"), sort_keys=True).encode())
+    signature = hmac.new(settings.session_secret.encode(), body.encode(), hashlib.sha256).digest()
+    return f"{body}.{_b64(signature)}"
+
+
+def verify_token(token: str) -> dict[str, Any] | None:
+    """Claims of a valid, unexpired signed token; None for anything else."""
+    body, _, signature = token.partition(".")
+    expected = hmac.new(settings.session_secret.encode(), body.encode(), hashlib.sha256).digest()
+    try:
+        if not hmac.compare_digest(_unb64(signature), expected):
+            return None
+        claims = json.loads(_unb64(body))
+    except (ValueError, TypeError):
+        return None
+    if not isinstance(claims, dict) or claims.get("exp", 0) <= now().timestamp():
+        return None
+    return claims
 
 
 def _object_id(value: str) -> ObjectId:
@@ -176,13 +209,17 @@ class MongoStore:
 
 
 class InMemoryStore:
-    """Ephemeral store for local development (USE_IN_MEMORY_DB=true). Data resets on restart."""
+    """Ephemeral store for local development and demos (USE_IN_MEMORY_DB=true). Data resets on restart.
+
+    Session tokens are signed rather than stored, so they stay valid across processes: serverless hosts
+    like Vercel run several instances that don't share memory, and a stored session would only be known
+    to the instance that created it.
+    """
 
     def __init__(self) -> None:
         self.lock = asyncio.Lock()
         self.users_by_email: dict[str, dict[str, Any]] = {}
         self.users_by_id: dict[str, dict[str, Any]] = {}
-        self.sessions: dict[str, dict[str, Any]] = {}
         self.simulations: dict[str, dict[str, Any]] = {}
         self.trained: dict[str, dict[str, Any]] = {}
 
@@ -191,7 +228,8 @@ class InMemoryStore:
 
     def _add_user(self, email: str, name: str, password: str) -> dict[str, Any]:
         record = {
-            "id": uuid.uuid4().hex,
+            # Deterministic, so the same account has the same id on every instance.
+            "id": uuid.uuid5(uuid.NAMESPACE_URL, f"algo-trade:{email.lower()}").hex,
             "email": email.lower(),
             "name": name,
             "password_hash": pwd_context.hash(password),
@@ -223,21 +261,18 @@ class InMemoryStore:
 
     async def create_session(self, user_id: str) -> dict[str, Any]:
         async with self.lock:
-            token = secrets.token_urlsafe(32)
-            expiry = _session_expiry()
-            self.sessions[token] = {"user_id": user_id, "expires_at": expiry}
-            return {"token": token, "expires_at": expiry}
+            user = self.users_by_id[user_id]
+        expiry = _session_expiry()
+        claims = {"sub": user_id, "email": user["email"], "name": user["name"], "exp": int(expiry.timestamp())}
+        return {"token": sign_token(claims), "expires_at": expiry}
 
     async def resolve_token(self, token: str) -> dict[str, Any] | None:
+        claims = verify_token(token)
+        if not claims:
+            return None
         async with self.lock:
-            session = self.sessions.get(token)
-            if not session:
-                return None
-            if session["expires_at"] <= now():
-                self.sessions.pop(token, None)
-                return None
-            user = self.users_by_id.get(session["user_id"])
-            return _public_user(user) if user else None
+            user = self.users_by_id.get(claims["sub"])
+        return _public_user(user) if user else {"id": claims["sub"], "email": claims["email"], "name": claims["name"]}
 
     async def list_simulations(self, user_id: str) -> list[dict[str, Any]]:
         async with self.lock:
