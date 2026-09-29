@@ -2,6 +2,37 @@ export interface User {
   id: string;
   email: string;
   name: string;
+  picture?: string;
+  isAdmin?: boolean;
+}
+
+export interface AuthConfig {
+  googleClientId: string | null;
+  passwordLogin: boolean;
+  devBypass: boolean;
+}
+
+export interface Visitor extends User {
+  createdAt: string | null;
+  lastLoginAt: string | null;
+  loginCount: number;
+}
+
+export interface SignInEvent {
+  id: string;
+  userId: string;
+  email: string;
+  name: string;
+  picture?: string | null;
+  provider: string;
+  userAgent?: string | null;
+  at: string;
+}
+
+export interface VisitorsResponse {
+  users: Visitor[];
+  logins: SignInEvent[];
+  totalUsers: number;
 }
 
 export interface MarketQuote {

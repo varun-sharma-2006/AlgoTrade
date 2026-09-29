@@ -3,6 +3,10 @@ import {
   createSimulation,
   deleteSimulation,
   devAuthBypass,
+  fetchAuthConfig,
+  fetchMe,
+  fetchVisitors,
+  googleLogin,
   fetchOverview,
   fetchSimulations,
   fetchStrategies,
@@ -26,7 +30,11 @@ import { StrategyCatalog } from "./components/StrategyCatalog";
 import { LiveMarketPage } from "./components/LiveMarketPage";
 import { LoginForm } from "./components/LoginForm";
 import { SignupForm } from "./components/SignupForm";
+import { GoogleLoginPage } from "./components/GoogleLoginPage";
+import { googleSignOut } from "./components/GoogleSignIn";
+import { VisitorsPage } from "./components/VisitorsPage";
 import type {
+  AuthConfig,
   ChatAction,
   ChatMessage,
   MarketQuote,
@@ -47,7 +55,7 @@ const WATCHLIST_SYMBOLS = ["AAPL", "MSFT", "GOOGL", "AMZN", "TSLA", "NVDA"];
 const TRUTHY_ENV_FLAGS = new Set(["1", "true", "yes", "on"]);
 
 type AuthView = "login" | "signup" | "dashboard";
-type Page = "home" | "simulations" | "chat" | "strategies" | "live";
+type Page = "home" | "simulations" | "chat" | "strategies" | "live" | "visitors";
 
 interface SessionState {
   token: string;
@@ -90,6 +98,14 @@ export default function App() {
   const [labLoading, setLabLoading] = useState(false);
   const [chatLoading, setChatLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [authConfig, setAuthConfig] = useState<AuthConfig | null>(null);
+
+  useEffect(() => {
+    fetchAuthConfig()
+      .then(setAuthConfig)
+      // Older or unreachable backends: fall back to email/password and the dev bypass.
+      .catch(() => setAuthConfig({ googleClientId: null, passwordLogin: true, devBypass: true }));
+  }, []);
 
   const [bypassRequestedFromPath] = useState(() => {
     if (typeof window === "undefined") {
@@ -115,7 +131,8 @@ export default function App() {
     };
   }, []);
 
-  const shouldAttemptBypass = loginBypassEnabled && !bypassFailed && !bypassDismissed && !token && !user;
+  const shouldAttemptBypass =
+    loginBypassEnabled && authConfig?.devBypass === true && !bypassFailed && !bypassDismissed && !token && !user;
 
   useEffect(() => {
     const stored = window.localStorage.getItem("algo-trade-session");
@@ -234,6 +251,22 @@ export default function App() {
     [handleAuthSuccess],
   );
 
+  const handleGoogleCredential = useCallback(
+    async (credential: string) => {
+      setLoading(true);
+      setError(null);
+      try {
+        handleAuthSuccess(await googleLogin(credential));
+      } catch (authError) {
+        console.error(authError);
+        setError(authError instanceof Error ? authError.message : "Google sign-in failed.");
+      } finally {
+        setLoading(false);
+      }
+    },
+    [handleAuthSuccess],
+  );
+
   const handleSignup = useCallback(
     async (name: string, email: string, password: string) => {
       setLoading(true);
@@ -257,8 +290,8 @@ export default function App() {
       return;
     }
 
-    if (bypassInProgressRef.current) {
-      return;
+    if (bypassInProgressRef.current || !authConfig) {
+      return; // wait for the auth config: a Google-only deployment has no bypass
     }
 
     if (!shouldAttemptBypass) {
@@ -294,7 +327,7 @@ export default function App() {
     };
 
     void run();
-  }, [loginBypassEnabled, shouldAttemptBypass, bypassPayload, handleAuthSuccess]);
+  }, [loginBypassEnabled, authConfig, shouldAttemptBypass, bypassPayload, handleAuthSuccess]);
 
   const handleCreateSimulation = useCallback(
     async (payload: SimulationInput) => {
@@ -429,6 +462,7 @@ export default function App() {
   // An explicit logout stops the dev bypass from signing the user straight back in.
   const handleLogout = useCallback(() => {
     setBypassDismissed(true);
+    googleSignOut();
     resetSession();
   }, [resetSession]);
 
@@ -446,6 +480,16 @@ export default function App() {
     }
     return false;
   }, [resetSession]);
+
+  // Stored sessions predate role changes, so ask the server who we are (isAdmin, profile photo).
+  useEffect(() => {
+    if (!token) return;
+    fetchMe(token)
+      .then((me) => setUser((current) => (current && current.id === me.id ? { ...current, ...me } : current)))
+      .catch((meError) => handleAuthFailure(meError));
+  }, [token, handleAuthFailure]);
+
+  const loadVisitors = useCallback(() => fetchVisitors(token ?? ""), [token]);
 
   const handleSearchSymbols = useCallback(
     async (query: string) => {
@@ -527,7 +571,7 @@ export default function App() {
 
   const authError = useMemo(() => (view === "dashboard" ? null : error), [view, error]);
 
-  if (initializingBypass) {
+  if (initializingBypass || (!authConfig && !token)) {
     return (
       <div className="splash">
         Signing you in...
@@ -536,6 +580,16 @@ export default function App() {
   }
 
   if (!token || !user || view !== "dashboard") {
+    if (authConfig?.googleClientId) {
+      return (
+        <GoogleLoginPage
+          clientId={authConfig.googleClientId}
+          onCredential={handleGoogleCredential}
+          loading={loading}
+          error={authError}
+        />
+      );
+    }
     return view === "signup" ? (
       <SignupForm
         loading={loading}
@@ -596,6 +650,8 @@ export default function App() {
         return <ChatbotPanel messages={chatMessages} loading={chatLoading} onSend={handleChatSend} />;
       case "strategies":
         return <StrategyCatalog strategies={strategies} />;
+      case "visitors":
+        return user.isAdmin ? <VisitorsPage onLoad={loadVisitors} /> : null;
       case "live":
         return (
           <LiveMarketPage
@@ -614,7 +670,13 @@ export default function App() {
       <aside className="sidebar">
         <div className="brand">
           <strong>Algo Trade Simulator</strong>
-          <span className="subtle">{user.email}</span>
+          <div className="profile">
+            {user.picture ? <img className="avatar" src={user.picture} alt="" referrerPolicy="no-referrer" /> : null}
+            <div>
+              <div>{user.name}</div>
+              <span className="subtle">{user.email}</span>
+            </div>
+          </div>
         </div>
         <nav>
           <button type="button" className={page === "home" ? "active" : ""} onClick={() => setPage("home")}>
@@ -644,6 +706,15 @@ export default function App() {
           >
             Live data
           </button>
+          {user.isAdmin ? (
+            <button
+              type="button"
+              className={page === "visitors" ? "active" : ""}
+              onClick={() => setPage("visitors")}
+            >
+              Visitors
+            </button>
+          ) : null}
         </nav>
         <button type="button" className="logout" onClick={handleLogout}>
           Log out

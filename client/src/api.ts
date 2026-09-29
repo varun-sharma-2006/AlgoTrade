@@ -15,6 +15,8 @@ import type {
   SparklineSeries,
   SearchResult,
   ChartResponse,
+  AuthConfig,
+  VisitorsResponse,
 } from "./types";
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
@@ -106,6 +108,22 @@ export function signup(payload: SignupPayload) {
 
 export function login(payload: LoginPayload) {
   return request<AuthResponse>("/auth/login", { method: "POST", body: payload });
+}
+
+export function fetchAuthConfig() {
+  return request<AuthConfig>("/auth/config");
+}
+
+export function googleLogin(credential: string) {
+  return request<AuthResponse>("/auth/google", { method: "POST", body: { credential } });
+}
+
+export function fetchMe(token: string) {
+  return request<User>("/auth/me", { token });
+}
+
+export function fetchVisitors(token: string) {
+  return request<VisitorsResponse>("/admin/visitors", { token });
 }
 
 export function devAuthBypass(payload?: DevAuthBypassPayload) {

@@ -16,6 +16,10 @@ class LoginRequest(BaseModel):
     password: str
 
 
+class GoogleLoginRequest(BaseModel):
+    credential: str = Field(min_length=20, max_length=4096)  # the ID token from Google Identity Services
+
+
 class DevAuthBypassRequest(BaseModel):
     email: EmailStr | None = None
     name: str | None = Field(default=None, max_length=120)

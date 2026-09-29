@@ -8,6 +8,7 @@ from typing import Any
 from fastapi import Depends, Header, HTTPException, Request, status
 
 from backend import stores
+from backend.config import settings
 from backend.stores import Store
 
 
@@ -29,3 +30,13 @@ async def get_current_user(authorization: str = Header(""), store: Store = Depen
     if not user:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired session")
     return user | {"token": token}
+
+
+def is_admin(user: dict[str, Any]) -> bool:
+    return user.get("email", "").lower() in settings.admin_emails
+
+
+async def require_admin(user: dict[str, Any] = Depends(get_current_user)) -> dict[str, Any]:
+    if not is_admin(user):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admins only")
+    return user

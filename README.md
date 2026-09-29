@@ -26,6 +26,7 @@ Live market data comes from Yahoo Finance, and a trading copilot answers questio
   rate-limited, a built-in analyst ranks stocks by trend, momentum and RSI, analyses tickers, and explains concepts.
 - **Live market data**: watchlist quotes, sparklines, ticker search and candlestick charts.
 - **Paper-trading simulations**: create, update and track simulations per user.
+- **Sign in with Google**: Google verifies each visitor's email; an admin-only **Visitors** page lists who signed in, when and from which device, with CSV export.
 - **Runs anywhere**: an in-memory mode needs no database; MongoDB is used for persistence.
 
 | Strategy lab | Trading copilot |
@@ -142,6 +143,8 @@ override variables already set in your system environment.
 | `MONGO_URL` / `MONGODB_URI` / `MONGO_URI` | MongoDB connection string, first one set wins | `mongodb://localhost:27017` |
 | `MONGODB_DB` | Database name | `algo-trade-simulator` |
 | `ENABLE_DEV_ENDPOINTS` | Enable `POST /dev/auth/bypass` for automatic dev login | `false` |
+| `GOOGLE_CLIENT_ID` | OAuth client ID for Sign in with Google. When set, visitors must sign in with Google, and password sign-up and the dev bypass are turned off | unset |
+| `ADMIN_EMAILS` | Comma-separated emails that can open the **Visitors** page (who signed in, when, and on which device) | unset |
 | `GOOGLE_API_KEY` | Gemini API key for the chatbot (optional) | unset |
 | `GEMINI_MODELS` | Gemini models tried in order | `gemini-3.5-flash,gemini-3.1-flash-lite,gemini-3.5-flash-lite,gemini-flash-latest` |
 | `GEMINI_BUDGET_SECONDS` | How long to retry Gemini before the built-in analyst answers | `12` |
@@ -168,6 +171,10 @@ Interactive docs are served at `/docs`. Authenticated routes expect `Authorizati
 | Method | Path | Description |
 | --- | --- | --- |
 | `POST` | `/auth/signup`, `/auth/login` | Create an account or sign in; returns a token |
+| `GET` | `/auth/config` | Which sign-in methods are enabled |
+| `POST` | `/auth/google` | Exchange a Google ID token for a session |
+| `GET` | `/auth/me` | The signed-in user, including `isAdmin` |
+| `GET` | `/admin/visitors` | Admin only: users and recent sign-ins |
 | `POST` | `/dev/auth/bypass` | Dev-only automatic sign-in |
 | `GET` | `/market/watchlist`, `/market/quote/{symbol}` | Live quotes |
 | `GET` | `/market/search?q=`, `/market/chart/{symbol}` | Ticker search and OHLC candles |

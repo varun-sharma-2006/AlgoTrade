@@ -7,9 +7,9 @@ from fastapi.testclient import TestClient
 
 from backend import main, stores
 from backend.config import settings
+from backend.conftest import fake_chart
 from backend.routes import analytics
 from backend.stores import InMemoryStore, now, sign_token, verify_token
-from backend.test_api import fake_chart
 
 
 def test_token_from_one_instance_is_accepted_by_another():

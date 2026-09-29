@@ -37,6 +37,11 @@ class Settings(BaseModel):
     enable_dev_endpoints: bool = Field(default_factory=lambda: env_flag("ENABLE_DEV_ENDPOINTS"))
     use_in_memory_db: bool = Field(default_factory=lambda: env_flag("USE_IN_MEMORY_DB"))
     google_api_key: str | None = Field(default_factory=lambda: os.getenv("GOOGLE_API_KEY"))
+    # "Sign in with Google" OAuth client ID (public, not a secret). When set, visitors must sign in with
+    # Google and email/password sign-up is turned off.
+    google_client_id: str = Field(default_factory=lambda: os.getenv("GOOGLE_CLIENT_ID", "").strip())
+    # Emails allowed to open the Visitors (admin) page.
+    admin_emails: list[str] = Field(default_factory=lambda: [e.lower() for e in _csv(os.getenv("ADMIN_EMAILS", ""))])
     mongo_uri: str = Field(default_factory=resolve_mongo_uri)
     mongo_db_name: str = Field(default_factory=lambda: os.getenv("MONGODB_DB", "algo-trade-simulator"))
     gemini_models: list[str] = Field(default_factory=lambda: _csv(os.getenv("GEMINI_MODELS", DEFAULT_GEMINI_MODELS)))

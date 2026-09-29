@@ -46,7 +46,19 @@ def serialize_mongo_doc(doc: Any) -> Any:
 
 
 def _public_user(record: dict[str, Any]) -> dict[str, Any]:
-    return {"id": str(record.get("id") or record.get("_id")), "email": record["email"], "name": record["name"]}
+    user = {"id": str(record.get("id") or record.get("_id")), "email": record["email"], "name": record["name"]}
+    if record.get("picture"):
+        user["picture"] = record["picture"]
+    return user
+
+
+def _visitor(record: dict[str, Any]) -> dict[str, Any]:
+    """User fields shown on the admin Visitors page (never the password hash)."""
+    return _public_user(record) | {
+        "createdAt": record.get("createdAt"),
+        "lastLoginAt": record.get("lastLoginAt"),
+        "loginCount": record.get("loginCount", 0),
+    }
 
 
 def _session_expiry() -> datetime:
@@ -164,9 +176,7 @@ class MongoStore:
         if expires_at <= now():
             return None
         user = await self.db.users.find_one({"_id": session["user_id"]})
-        if not user:
-            return None
-        return {"id": str(user["_id"]), "email": user["email"], "name": user["name"]}
+        return _public_user(user) if user else None
 
     # Simulations
     async def list_simulations(self, user_id: str) -> list[dict[str, Any]]:
@@ -216,6 +226,35 @@ class MongoStore:
         cursor = self.trained.find({"userId": ObjectId(user_id)})
         return serialize_mongo_doc(await cursor.to_list(length=100))
 
+    # Sign-in tracking
+    async def record_login(
+        self, user: dict[str, Any], picture: str | None, provider: str, user_agent: str | None
+    ) -> None:
+        stamp = now()
+        update: dict[str, Any] = {"$set": {"lastLoginAt": stamp, "name": user["name"]}, "$inc": {"loginCount": 1}}
+        if picture:
+            update["$set"]["picture"] = picture
+        await self.users.update_one({"_id": ObjectId(user["id"])}, update)
+        await self.db.logins.insert_one(
+            {
+                "userId": ObjectId(user["id"]),
+                "email": user["email"],
+                "name": user["name"],
+                "picture": picture,
+                "provider": provider,
+                "userAgent": user_agent,
+                "at": stamp,
+            }
+        )
+
+    async def list_users(self) -> list[dict[str, Any]]:
+        cursor = self.users.find({}, {"password_hash": 0}).sort("lastLoginAt", -1)
+        return [_visitor(doc) for doc in serialize_mongo_doc(await cursor.to_list(length=1000))]
+
+    async def list_logins(self, limit: int = 100) -> list[dict[str, Any]]:
+        cursor = self.db.logins.find({}).sort("at", -1).limit(limit)
+        return serialize_mongo_doc(await cursor.to_list(length=limit))
+
 
 class InMemoryStore:
     """Ephemeral store for local development and demos (USE_IN_MEMORY_DB=true). Data resets on restart.
@@ -231,6 +270,7 @@ class InMemoryStore:
         self.users_by_id: dict[str, dict[str, Any]] = {}
         self.simulations: dict[str, dict[str, Any]] = {}
         self.trained: dict[str, dict[str, Any]] = {}
+        self.logins: list[dict[str, Any]] = []
 
     async def close(self) -> None:
         return None
@@ -334,6 +374,38 @@ class InMemoryStore:
     async def list_trained(self, user_id: str) -> list[dict[str, Any]]:
         async with self.lock:
             return [item for item in self.trained.values() if item["userId"] == user_id]
+
+    async def record_login(
+        self, user: dict[str, Any], picture: str | None, provider: str, user_agent: str | None
+    ) -> None:
+        stamp = now().isoformat()
+        async with self.lock:
+            record = self.users_by_id.get(user["id"])
+            if record:
+                record.update(name=user["name"], lastLoginAt=stamp, loginCount=record.get("loginCount", 0) + 1)
+                if picture:
+                    record["picture"] = picture
+            self.logins.append(
+                {
+                    "id": uuid.uuid4().hex,
+                    "userId": user["id"],
+                    "email": user["email"],
+                    "name": user["name"],
+                    "picture": picture,
+                    "provider": provider,
+                    "userAgent": user_agent,
+                    "at": stamp,
+                }
+            )
+
+    async def list_users(self) -> list[dict[str, Any]]:
+        async with self.lock:
+            users = [_visitor(record) for record in self.users_by_id.values()]
+        return sorted(users, key=lambda u: u["lastLoginAt"] or "", reverse=True)
+
+    async def list_logins(self, limit: int = 100) -> list[dict[str, Any]]:
+        async with self.lock:
+            return list(reversed(self.logins[-limit:]))
 
 
 Store = MongoStore | InMemoryStore
