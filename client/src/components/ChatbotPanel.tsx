@@ -1,5 +1,6 @@
 import { FormEvent, useEffect, useRef, useState } from "react";
 import type { ChatMessage } from "../types";
+import { FormattedText } from "./FormattedText";
 
 interface ChatbotPanelProps {
   messages: ChatMessage[];
@@ -40,7 +41,9 @@ export function ChatbotPanel({ messages, loading, onSend }: ChatbotPanelProps) {
         ) : (
           messages.map((message, index) => (
             <article key={`${message.timestamp}-${index}`} className={`bubble ${message.role}`}>
-              <div className="content">{message.content}</div>
+              <div className="content">
+                <FormattedText text={message.content} />
+              </div>
               {message.citations?.length ? (
                 <ul className="citations">
                   {message.citations.map((citation) => (
