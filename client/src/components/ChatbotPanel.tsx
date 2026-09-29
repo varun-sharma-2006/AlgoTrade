@@ -38,7 +38,7 @@ export function ChatbotPanel({ messages, loading, onSend }: ChatbotPanelProps) {
 
       <div className="chat-window" ref={containerRef}>
         {messages.length === 0 ? (
-          <p className="empty">Say hi or ask for a quick strategy idea. The assistant can also spin up a simulation for you.</p>
+          <p className="empty">Try “Which stock should I buy and why?”, “Analyse NVDA” or “What is RSI?”.</p>
         ) : (
           messages.map((message, index) => (
             <article key={`${message.timestamp}-${index}`} className={`bubble ${message.role}`}>

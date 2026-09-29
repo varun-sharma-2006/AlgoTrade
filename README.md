@@ -51,7 +51,7 @@ flowchart LR
     Routes --> Stores["stores.py"]
     Stores --> Mongo[("MongoDB")]
     Stores --> Memory[("In-memory store")]
-    Routes --> Market["market.py"] --> Yahoo["Yahoo Finance (yfinance)"]
+    Routes --> Market["market.py"] --> Yahoo["Yahoo Finance chart API"]
     Gemini --> GoogleAI["Google Gemini API"]
 ```
 
@@ -63,7 +63,7 @@ backend/
   config.py         environment settings
   schemas.py        request models
   stores.py         MongoStore and InMemoryStore
-  market.py         quotes, charts, search (yfinance + offline fallbacks)
+  market.py         quotes, charts, search (Yahoo Finance JSON API + offline fallbacks)
   strategies.py     strategy signals and the backtester
   advisor.py        chatbot analyst used when Gemini is unavailable
   gemini.py         Gemini client with retries and model fallback
@@ -152,7 +152,7 @@ override variables already set in your system environment.
 | `GOOGLE_API_KEY` | Gemini API key for the chatbot (optional) | unset |
 | `GEMINI_MODELS` | Gemini models tried in order | `gemini-3.5-flash,gemini-3.1-flash-lite,gemini-3.5-flash-lite,gemini-flash-latest` |
 | `GEMINI_BUDGET_SECONDS` | How long to retry Gemini before the built-in analyst answers | `12` |
-| `BACKTEST_PERIOD` | History used for backtests (yfinance period) | `2y` |
+| `BACKTEST_PERIOD` | History used for backtests (Yahoo Finance range, e.g. `1y`, `2y`, `5y`) | `2y` |
 | `TRADING_FEE_BPS` | Fee charged on every entry and exit, in basis points | `10` |
 | `STATIC_DIR` | Serve a built frontend (`dist/`) from the API, for single-container deploys | unset |
 | `FRONTEND_ORIGIN` | Allowed CORS origin | `http://localhost:5173` |
