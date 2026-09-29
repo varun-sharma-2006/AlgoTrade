@@ -1,0 +1,31 @@
+name: Deploy demo to Hugging Face
+
+# Mirrors master to a Hugging Face Space (free hosting, no card).
+# Setup once: repo Settings -> Secrets and variables -> Actions:
+#   secret   HF_TOKEN  = a Hugging Face access token with write access to the Space
+#   variable HF_SPACE  = <hf-username>/<space-name>
+on:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    if: ${{ vars.HF_SPACE != '' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Push a snapshot to the Space
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          HF_SPACE: ${{ vars.HF_SPACE }}
+        run: |
+          # Spaces need their own README front matter and reject plain-git binary files (screenshots).
+          cp deploy/huggingface/README.md README.md
+          rm -rf docs
+          git config user.name "github-actions"
+          git config user.email "github-actions@users.noreply.github.com"
+          git checkout --orphan space-snapshot
+          git add -A
+          git commit -q -m "Deploy ${GITHUB_SHA::7}"
+          git push --force "https://user:${HF_TOKEN}@huggingface.co/spaces/${HF_SPACE}" space-snapshot:main

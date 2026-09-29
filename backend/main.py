@@ -4,10 +4,12 @@ from __future__ import annotations
 
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 
 from backend.config import logger, settings
 from backend.deps import get_current_user, get_db
@@ -49,3 +51,20 @@ for module in (auth, market, simulations, analytics, chat):
 @app.get("/health", tags=["meta"])
 async def health() -> dict[str, Any]:
     return {"status": "ok", "timestamp": now().isoformat()}
+
+
+def mount_frontend(target: FastAPI, static_dir: str) -> None:
+    """Serve the built single-page app; unknown paths fall back to index.html. Registered after the API routes."""
+    root = Path(static_dir).resolve()
+    index = root / "index.html"
+
+    @target.get("/{full_path:path}", include_in_schema=False)
+    async def frontend(full_path: str) -> FileResponse:
+        candidate = (root / full_path).resolve()
+        if full_path and candidate.is_file() and candidate.is_relative_to(root):
+            return FileResponse(candidate)
+        return FileResponse(index)
+
+
+if settings.static_dir and Path(settings.static_dir, "index.html").is_file():
+    mount_frontend(app, settings.static_dir)

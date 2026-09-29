@@ -41,6 +41,8 @@ class Settings(BaseModel):
     gemini_budget_seconds: float = Field(default_factory=lambda: float(os.getenv("GEMINI_BUDGET_SECONDS", "12")))
     backtest_period: str = Field(default_factory=lambda: os.getenv("BACKTEST_PERIOD", "2y"))
     trading_fee_bps: float = Field(default_factory=lambda: float(os.getenv("TRADING_FEE_BPS", "10")))
+    # Built frontend (npm run build -> dist/) to serve from the API, for single-container deploys.
+    static_dir: str = Field(default_factory=lambda: os.getenv("STATIC_DIR", ""))
     yahoo_user_agent: str = Field(
         default_factory=lambda: os.getenv(
             "YAHOO_USER_AGENT", "Mozilla/5.0 (compatible; AlgoTradeSimulator/1.0; +https://example.com)"

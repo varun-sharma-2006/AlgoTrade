@@ -111,9 +111,18 @@ Check your configuration with `python -m backend.scripts.check_setup`.
 
 ## Deploying a live demo
 
-[`render.yaml`](render.yaml) defines the API and the static frontend. On [Render](https://render.com), choose
-**New → Blueprint**, select this repository, and paste your `GOOGLE_API_KEY` when prompted. The demo uses the
-in-memory store; set `MONGO_URL` (for example MongoDB Atlas) and `USE_IN_MEMORY_DB=false` for persistence.
+**Hugging Face Spaces (free, no card).** The root [`Dockerfile`](Dockerfile) builds the frontend and serves it from
+the API, so the whole app runs in one container at one URL. Create a Space with the **Docker** SDK, then either push
+this repo to it (using [`deploy/huggingface/README.md`](deploy/huggingface/README.md) as the Space's README) or let
+[`deploy-space.yml`](.github/workflows/deploy-space.yml) do it on every push: add an `HF_TOKEN` secret and an
+`HF_SPACE` variable (`user/space-name`) in the GitHub repo settings. Add `GOOGLE_API_KEY` as a Space secret to enable
+Gemini.
+
+**Render.** [`render.yaml`](render.yaml) defines the API and the static frontend as two services: choose
+**New → Blueprint** and select this repository. Render requires a payment card on file, even for free services.
+
+Both demos use the in-memory store; set `MONGO_URL` (for example MongoDB Atlas) and `USE_IN_MEMORY_DB=false` for
+persistence.
 
 ## Configuration
 
@@ -131,6 +140,7 @@ override variables already set in your system environment.
 | `GEMINI_BUDGET_SECONDS` | How long to retry Gemini before the built-in analyst answers | `12` |
 | `BACKTEST_PERIOD` | History used for backtests (yfinance period) | `2y` |
 | `TRADING_FEE_BPS` | Fee charged on every entry and exit, in basis points | `10` |
+| `STATIC_DIR` | Serve a built frontend (`dist/`) from the API, for single-container deploys | unset |
 | `FRONTEND_ORIGIN` | Allowed CORS origin | `http://localhost:5173` |
 | `SESSION_DURATION_DAYS` | Session lifetime | `7` |
 | `YAHOO_USER_AGENT` | User agent for Yahoo Finance search requests | a generic browser string |
