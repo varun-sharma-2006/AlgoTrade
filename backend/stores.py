@@ -16,7 +16,7 @@ from bson.errors import InvalidId
 from motor.motor_asyncio import AsyncIOMotorClient, AsyncIOMotorCollection
 from passlib.context import CryptContext
 
-from backend.config import settings
+from backend.config import logger, settings
 from backend.schemas import SimulationInput, SimulationUpdate
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
@@ -293,3 +293,11 @@ class InMemoryStore:
 
 
 Store = MongoStore | InMemoryStore
+
+
+def create_store() -> Store:
+    if settings.use_in_memory_db:
+        logger.info("Using in-memory store")
+        return InMemoryStore()
+    logger.info("Connecting to MongoDB at %s", settings.mongo_uri)
+    return MongoStore(settings.mongo_uri, settings.mongo_db_name)

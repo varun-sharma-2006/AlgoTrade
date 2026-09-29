@@ -1,12 +1,17 @@
-"""Market data from Yahoo Finance (via yfinance), with offline fallbacks for local development."""
+"""Market data from Yahoo Finance's public chart API, with offline fallbacks for local development.
+
+Talking to the JSON endpoints directly (instead of through yfinance) keeps pandas/numpy out of the
+dependency tree, which makes installs and serverless cold starts much lighter.
+"""
 
 from __future__ import annotations
 
-import math
 import time
 from collections.abc import Sequence
-from datetime import UTC, timedelta
+from concurrent.futures import ThreadPoolExecutor
+from datetime import UTC, datetime
 from typing import Any
+from urllib.parse import quote
 
 import requests
 from fastapi import HTTPException
@@ -14,12 +19,8 @@ from fastapi import HTTPException
 from backend.config import logger, settings
 from backend.stores import now
 
-try:
-    import yfinance as yf
-except ModuleNotFoundError:  # pragma: no cover - yfinance is in requirements
-    yf = None
-
 WATCHLIST_SYMBOLS = ["AAPL", "MSFT", "GOOGL", "AMZN", "TSLA", "NVDA"]
+YAHOO = "https://query1.finance.yahoo.com"
 
 OFFLINE_QUOTES: dict[str, dict[str, Any]] = {
     "AAPL": {"symbol": "AAPL", "price": 182.54, "previousClose": 181.82, "currency": "USD"},
@@ -35,61 +36,150 @@ _CLOSE_CACHE_SECONDS = 600
 _close_cache: dict[str, tuple[float, list[float]]] = {}
 
 
+class MarketDataError(Exception):
+    """Yahoo returned no usable data (unknown symbol, outage, or blocked request)."""
+
+
 def yahoo_headers() -> dict[str, str]:
     return {"User-Agent": settings.yahoo_user_agent, "Accept": "application/json"}
+
+
+def _get_json(path: str, params: dict[str, Any]) -> dict[str, Any]:
+    try:
+        response = requests.get(f"{YAHOO}{path}", params=params, headers=yahoo_headers(), timeout=10)
+    except requests.RequestException as exc:
+        raise MarketDataError(str(exc)) from exc
+    if response.status_code == 404:
+        raise MarketDataError("symbol not found")
+    if not response.ok:
+        raise MarketDataError(f"HTTP {response.status_code}")
+    return response.json()
+
+
+def parse_chart(payload: dict[str, Any], symbol: str, range_value: str, interval: str) -> dict[str, Any]:
+    """Turn a /v8/finance/chart response into the API's chart shape, skipping incomplete bars."""
+    results = (payload.get("chart") or {}).get("result") or []
+    if not results:
+        raise MarketDataError(str((payload.get("chart") or {}).get("error") or "no data"))
+    result = results[0]
+    meta = result.get("meta") or {}
+    indicators = result.get("indicators") or {}
+    quote_data = (indicators.get("quote") or [{}])[0]
+    adjclose = ((indicators.get("adjclose") or [{}])[0]).get("adjclose") or []
+    points: list[dict[str, Any]] = []
+    for index, stamp in enumerate(result.get("timestamp") or []):
+        bar = {key: (quote_data.get(key) or [None] * (index + 1))[index] for key in ("open", "high", "low", "close")}
+        if any(value is None for value in bar.values()):
+            continue
+        # Adjust OHLC for splits and dividends (like yfinance's auto_adjust) so backtest returns include them.
+        adjusted = adjclose[index] if index < len(adjclose) else None
+        factor = adjusted / bar["close"] if adjusted and bar["close"] else 1.0
+        volume = (quote_data.get("volume") or [None] * (index + 1))[index]
+        points.append(
+            {
+                "timestamp": datetime.fromtimestamp(stamp, UTC).isoformat(),
+                **{key: float(value) * factor for key, value in bar.items()},
+                "volume": int(volume) if volume is not None else None,
+            }
+        )
+    if not points:
+        raise MarketDataError("no complete bars")
+    return {
+        "symbol": symbol.upper(),
+        "points": points,
+        "timezone": meta.get("exchangeTimezoneName") or "UTC",
+        "currency": meta.get("currency"),
+        "range": range_value,
+        "interval": interval,
+        "previousClose": points[0]["close"],
+        "regularMarketPrice": meta.get("regularMarketPrice"),
+    }
+
+
+def yahoo_chart(symbol: str, range_value: str, interval: str) -> dict[str, Any]:
+    payload = _get_json(
+        f"/v8/finance/chart/{quote(symbol.upper(), safe='')}", {"range": range_value, "interval": interval}
+    )
+    return parse_chart(payload, symbol, range_value, interval)
+
+
+def _quote_from_chart(chart: dict[str, Any]) -> dict[str, Any]:
+    closes = [point["close"] for point in chart["points"]]
+    price = float(chart.get("regularMarketPrice") or closes[-1])
+    # Daily bars always end with the latest session, so the previous close is the bar before it.
+    previous = closes[-2] if len(closes) > 1 else closes[-1]
+    change = price - previous
+    return {
+        "symbol": chart["symbol"],
+        "price": price,
+        "change": change,
+        "changePercent": change / previous * 100 if previous else 0.0,
+        "previousClose": previous,
+        "currency": chart.get("currency"),
+        "updated": now().isoformat(),
+    }
 
 
 def fetch_quotes(symbols: list[str]) -> list[dict[str, Any]]:
     if not symbols:
         return []
-    collected: list[dict[str, Any]] = []
-    if yf is not None:
+    requested = [symbol.upper() for symbol in symbols]
+
+    def one(symbol: str) -> dict[str, Any] | None:
         try:
-            collected = fetch_quotes_with_yfinance([symbol.upper() for symbol in symbols])
-        except Exception as exc:
-            logger.error("yfinance quote fetch failed: %s", exc)
-            raise HTTPException(status_code=502, detail="Quote service error") from exc
+            return _quote_from_chart(yahoo_chart(symbol, "5d", "1d"))
+        except MarketDataError as exc:
+            logger.warning("Quote for %s unavailable: %s", symbol, exc)
+            return None
+
+    with ThreadPoolExecutor(max_workers=min(8, len(requested))) as pool:
+        collected = [quote_ for quote_ in pool.map(one, requested) if quote_]
     if not collected and settings.use_in_memory_db:
-        return build_offline_quotes(symbols)
+        return build_offline_quotes(requested)
     return collected
 
 
 def fetch_chart(symbol: str, range_value: str = "1mo", interval: str = "1d") -> dict[str, Any]:
-    if yf is not None:
-        try:
-            chart = fetch_chart_with_yfinance(symbol, range_value, interval)
-            if chart["points"]:
-                return chart
-        except Exception as exc:
-            logger.error("yfinance chart fetch failed for %s: %s", symbol, exc)
-            raise HTTPException(status_code=502, detail="Chart service error") from exc
-    return build_offline_chart(symbol, range_value, interval)
+    try:
+        return yahoo_chart(symbol, range_value, interval)
+    except MarketDataError as exc:
+        logger.error("Chart fetch failed for %s: %s", symbol, exc)
+        raise HTTPException(status_code=502, detail=f"No market data for {symbol.upper()}") from exc
 
 
 def search_symbols(query: str) -> list[dict[str, Any]]:
-    url = "https://query1.finance.yahoo.com/v1/finance/search"
-    params = {"q": query, "quotesCount": 10, "newsCount": 0}
     try:
-        response = requests.get(url, params=params, headers=yahoo_headers(), timeout=10)
-        response.raise_for_status()
-    except requests.RequestException as exc:
+        data = _get_json("/v1/finance/search", {"q": query, "quotesCount": 10, "newsCount": 0})
+    except MarketDataError as exc:
         if settings.use_in_memory_db:
             return build_offline_search(query)
         raise HTTPException(status_code=502, detail=f"Search service error: {exc}") from exc
-    output: list[dict[str, Any]] = []
-    for entry in response.json().get("quotes") or []:
-        if not entry.get("symbol"):
+    return [
+        {
+            "symbol": entry["symbol"],
+            "shortName": entry.get("shortname"),
+            "longName": entry.get("longname"),
+            "exchange": entry.get("exchange"),
+            "type": entry.get("quoteType"),
+        }
+        for entry in data.get("quotes") or []
+        if entry.get("symbol")
+    ]
+
+
+def _spark_closes(symbols: list[str]) -> dict[str, list[float]]:
+    """Daily closes for several symbols in one request (Yahoo's spark endpoint)."""
+    data = _get_json("/v7/finance/spark", {"symbols": ",".join(symbols), "range": "6mo", "interval": "1d"})
+    closes: dict[str, list[float]] = {}
+    for item in (data.get("spark") or {}).get("result") or []:
+        responses = item.get("response") or []
+        if not responses:
             continue
-        output.append(
-            {
-                "symbol": entry["symbol"],
-                "shortName": entry.get("shortname"),
-                "longName": entry.get("longname"),
-                "exchange": entry.get("exchange"),
-                "type": entry.get("quoteType"),
-            }
-        )
-    return output
+        series = ((responses[0].get("indicators") or {}).get("quote") or [{}])[0].get("close") or []
+        values = [float(value) for value in series if value is not None]
+        if values:
+            closes[item["symbol"].upper()] = values
+    return closes
 
 
 def load_closes(symbols: Sequence[str]) -> dict[str, list[float]]:
@@ -103,93 +193,19 @@ def load_closes(symbols: Sequence[str]) -> dict[str, list[float]]:
             result[symbol] = cached[1]
         else:
             missing.append(symbol)
-    if missing and yf is not None:
+    for start in range(0, len(missing), 10):
         try:
-            frame = yf.download(missing, period="6mo", interval="1d", progress=False, auto_adjust=True, threads=True)
-            closes = frame["Close"]
-            for symbol in missing:
-                series = closes[symbol] if hasattr(closes, "columns") and symbol in closes.columns else closes
-                values = [float(v) for v in series.dropna().tolist()]
-                if values:
-                    result[symbol] = values
-                    _close_cache[symbol] = (stamp, values)
-        except Exception as exc:
+            result.update(_spark_closes(missing[start : start + 10]))
+        except MarketDataError as exc:
             logger.warning("Bulk price download failed: %s", exc)
     for symbol in missing:
-        if symbol in result:
-            continue
-        try:
-            values = [p["close"] for p in fetch_chart(symbol, range_value="6mo", interval="1d")["points"]]
-        except Exception:  # unknown ticker or data outage
-            continue
-        if values:
-            result[symbol] = values
-            _close_cache[symbol] = (stamp, values)
+        if symbol not in result:
+            try:
+                result[symbol] = [point["close"] for point in yahoo_chart(symbol, "6mo", "1d")["points"]]
+            except MarketDataError:  # unknown ticker or data outage
+                continue
+        _close_cache[symbol] = (stamp, result[symbol])
     return result
-
-
-def fetch_quotes_with_yfinance(symbols: list[str]) -> list[dict[str, Any]]:
-    results: list[dict[str, Any]] = []
-    timestamp = now().isoformat()
-    for symbol in symbols:
-        ticker = yf.Ticker(symbol)
-        info = getattr(ticker, "fast_info", {}) or {}
-        price = info.get("last_price") or info.get("last_close") or info.get("previous_close")
-        previous = info.get("previous_close") or price
-        if price is None:
-            history = ticker.history(period="5d", interval="1d")
-            if not history.empty:
-                price = float(history["Close"].iloc[-1])
-                previous = float(history["Close"].iloc[-2]) if len(history) > 1 else price
-        if price is None:
-            continue
-        change = price - previous if previous else 0.0
-        results.append(
-            {
-                "symbol": symbol.upper(),
-                "price": float(price),
-                "change": float(change),
-                "changePercent": float(change / previous * 100) if previous else 0.0,
-                "previousClose": float(previous) if previous is not None else None,
-                "currency": info.get("currency"),
-                "updated": timestamp,
-            }
-        )
-    return results
-
-
-def fetch_chart_with_yfinance(symbol: str, range_value: str, interval: str) -> dict[str, Any]:
-    ticker = yf.Ticker(symbol)
-    history = ticker.history(period=range_value, interval=interval)
-    if history.empty:
-        raise ValueError("No history returned")
-    points: list[dict[str, Any]] = []
-    for timestamp, row in history.iterrows():
-        open_price, high, low, close = (float(row.get(key, float("nan"))) for key in ("Open", "High", "Low", "Close"))
-        if any(math.isnan(value) for value in (open_price, high, low, close)):
-            continue
-        volume_val = row.get("Volume", float("nan"))
-        ts = timestamp.replace(tzinfo=UTC) if timestamp.tzinfo is None else timestamp.tz_convert(UTC)
-        points.append(
-            {
-                "timestamp": ts.isoformat(),
-                "open": open_price,
-                "high": high,
-                "low": low,
-                "close": close,
-                "volume": None if math.isnan(volume_val) else int(volume_val),
-            }
-        )
-    info = getattr(ticker, "fast_info", None)
-    return {
-        "symbol": symbol.upper(),
-        "points": points,
-        "timezone": str(history.index.tz) if history.index.tz is not None else "UTC",
-        "currency": info.get("currency") if info else None,
-        "range": range_value,
-        "interval": interval,
-        "previousClose": points[0]["close"] if points else None,
-    }
 
 
 def build_offline_quotes(symbols: list[str]) -> list[dict[str, Any]]:
@@ -217,33 +233,6 @@ def build_offline_quotes(symbols: list[str]) -> list[dict[str, Any]]:
             }
         )
     return fallback
-
-
-def build_offline_chart(symbol: str, range_value: str, interval: str) -> dict[str, Any]:
-    base_price = float(OFFLINE_QUOTES.get(symbol.upper(), {}).get("price", 100.0))
-    points: list[dict[str, Any]] = []
-    for idx in range(60):
-        close = base_price * (1 + 0.002 * (idx - 30) / 30)
-        high, low = close * 1.01, close * 0.99
-        points.append(
-            {
-                "timestamp": (now() - timedelta(days=60 - idx)).isoformat(),
-                "open": (high + low) / 2,
-                "high": high,
-                "low": low,
-                "close": close,
-                "volume": 1000000 + idx * 2500,
-            }
-        )
-    return {
-        "symbol": symbol.upper(),
-        "points": points,
-        "timezone": "UTC",
-        "currency": OFFLINE_QUOTES.get(symbol.upper(), {}).get("currency", "USD"),
-        "range": range_value,
-        "interval": interval,
-        "previousClose": points[0]["close"],
-    }
 
 
 def build_offline_search(query: str) -> list[dict[str, Any]]:

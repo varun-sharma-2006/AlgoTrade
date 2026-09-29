@@ -11,25 +11,18 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 
-from backend.config import logger, settings
+from backend import stores
+from backend.config import settings
 from backend.deps import get_current_user, get_db
 from backend.routes import analytics, auth, chat, market, simulations
-from backend.stores import InMemoryStore, MongoStore, Store, now
+from backend.stores import InMemoryStore, MongoStore, now
 
-__all__ = ["app", "create_store", "get_current_user", "get_db", "MongoStore", "InMemoryStore", "now"]
-
-
-def create_store() -> Store:
-    if settings.use_in_memory_db:
-        logger.info("Using in-memory store")
-        return InMemoryStore()
-    logger.info("Connecting to MongoDB at %s", settings.mongo_uri)
-    return MongoStore(settings.mongo_uri, settings.mongo_db_name)
+__all__ = ["app", "get_current_user", "get_db", "MongoStore", "InMemoryStore", "now"]
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
-    app.state.store = create_store()
+    app.state.store = stores.create_store()
     try:
         yield
     finally:

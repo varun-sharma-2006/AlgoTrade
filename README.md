@@ -111,6 +111,11 @@ Check your configuration with `python -m backend.scripts.check_setup`.
 
 ## Deploying a live demo
 
+**Vercel (free, no card).** [`vercel.json`](vercel.json) builds the React app as static files and runs the API as a
+Python serverless function ([`api/index.py`](api/index.py)) under `/api`, all at one URL. Import the repository at
+[vercel.com/new](https://vercel.com/new) and deploy; no settings are required. Optionally add `GOOGLE_API_KEY` and, for
+data that survives cold starts, a `MONGO_URL` from a free MongoDB Atlas cluster in the project's Environment Variables.
+
 **Hugging Face Spaces (free, no card).** The root [`Dockerfile`](Dockerfile) builds the frontend and serves it from
 the API, so the whole app runs in one container at one URL. Create a Space with the **Docker** SDK, then either push
 this repo to it (using [`deploy/huggingface/README.md`](deploy/huggingface/README.md) as the Space's README) or let
@@ -184,7 +189,7 @@ Strategy parameters: `sma-crossover` uses `shortWindow` and `longWindow`, `mean-
 
 ```bash
 pytest backend              # backend: strategies, analyst, and every API route against both stores
-ruff check backend && ruff format --check backend
+ruff check backend api && ruff format --check backend api
 npm test                    # frontend: API client and strategy lab (Vitest + Testing Library)
 npm run check               # TypeScript
 ```

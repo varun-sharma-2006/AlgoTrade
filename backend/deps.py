@@ -6,13 +6,15 @@ from typing import Any
 
 from fastapi import Depends, Header, HTTPException, Request, status
 
+from backend import stores
 from backend.stores import Store
 
 
 async def get_db(request: Request) -> Store:
     store = getattr(request.app.state, "store", None)
     if store is None:
-        raise HTTPException(status_code=500, detail="Database not initialised")
+        # Serverless hosts (Vercel) and mounted sub-apps may never run the lifespan hook; create it on first use.
+        store = request.app.state.store = stores.create_store()
     return store
 
 

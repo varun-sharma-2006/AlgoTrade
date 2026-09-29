@@ -4,7 +4,7 @@ import pytest
 from fastapi.testclient import TestClient
 from mongomock_motor import AsyncMongoMockClient
 
-from backend import main
+from backend import main, stores
 from backend.config import settings
 from backend.routes import analytics
 from backend.stores import InMemoryStore, MongoStore
@@ -25,7 +25,7 @@ def client(request, monkeypatch):
         store = InMemoryStore()
     else:
         store = MongoStore("mongodb://test", "test-db", client=AsyncMongoMockClient())
-    monkeypatch.setattr(main, "create_store", lambda: store)
+    monkeypatch.setattr(stores, "create_store", lambda: store)
     monkeypatch.setattr(analytics, "fetch_chart", fake_chart)
     monkeypatch.setattr(settings, "enable_dev_endpoints", True)
     with TestClient(main.app) as test_client:
