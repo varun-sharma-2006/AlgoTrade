@@ -1935,3 +1935,10 @@ main {
     display: none;
   }
 }
+
+/* Google's button renders in an iframe with a light colour scheme. When it doesn't match the page's dark
+   scheme, browsers paint the iframe opaque white (a white box around the rounded button). Matching the
+   scheme keeps the iframe transparent. */
+.google-signin {
+  color-scheme: light;
+}
