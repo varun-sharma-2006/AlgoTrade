@@ -15,6 +15,26 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Check the Hugging Face token
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: |
+          if [ -z "$HF_TOKEN" ]; then
+            echo "::error::The HF_TOKEN secret is missing or empty. Add it under Settings -> Secrets and variables -> Actions."
+            exit 1
+          fi
+          who=$(curl -s -H "Authorization: Bearer $(echo "$HF_TOKEN" | tr -d '[:space:]')" https://huggingface.co/api/whoami-v2)
+          name=$(echo "$who" | jq -r '.name // empty')
+          role=$(echo "$who" | jq -r '.auth.accessToken.role // empty')
+          if [ -z "$name" ]; then
+            echo "::error::Hugging Face rejected HF_TOKEN (invalid, deleted or mistyped). Create a new Write token and update the secret."
+            exit 1
+          fi
+          echo "Token belongs to '$name' with role '$role'."
+          if [ "$role" = "read" ]; then
+            echo "::error::HF_TOKEN is a Read token. Create a token with the Write role and update the secret."
+            exit 1
+          fi
       - name: Push a snapshot to the Space
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
@@ -28,4 +48,10 @@ jobs:
           git checkout --orphan space-snapshot
           git add -A
           git commit -q -m "Deploy ${GITHUB_SHA::7}"
-          git push --force "https://user:${HF_TOKEN}@huggingface.co/spaces/${HF_SPACE}" space-snapshot:main
+          token=$(echo "$HF_TOKEN" | tr -d '[:space:]')
+          space=$(echo "$HF_SPACE" | tr -d '[:space:]')
+          if ! git push --force "https://user:${token}@huggingface.co/spaces/${space}" space-snapshot:main; then
+            echo "::error::Push to huggingface.co/spaces/${space} failed. Check HF_SPACE is exactly <username>/<space-name> and the token has Write access to it."
+            exit 1
+          fi
+          echo "Deployed. Watch the build at https://huggingface.co/spaces/${space}"
