@@ -1,3 +1,4 @@
+import { LogoMark } from "./Icons";
 import { FormEvent, useState } from "react";
 
 interface LoginFormProps {
@@ -26,8 +27,11 @@ export function LoginForm({ onSubmit, onSwitchToSignup, loading, error }: LoginF
 
   return (
     <div className="card auth-card">
+      <div className="login-card-logo">
+        <LogoMark size={48} />
+      </div>
       <h1>Welcome back</h1>
-      <p style={{ textAlign: "center", marginTop: "0.3rem", color: "rgba(226,232,240,0.7)" }}>
+      <p className="auth-lede">
         Sign in to resume your trading simulations.
       </p>
 
@@ -36,7 +40,7 @@ export function LoginForm({ onSubmit, onSwitchToSignup, loading, error }: LoginF
 
       <form onSubmit={handleSubmit} noValidate>
         <label>
-          <span style={{ display: "block", marginBottom: "0.35rem" }}>Email</span>
+          <span>Email</span>
           <input
             autoComplete="email"
             inputMode="email"
@@ -47,7 +51,7 @@ export function LoginForm({ onSubmit, onSwitchToSignup, loading, error }: LoginF
         </label>
 
         <label>
-          <span style={{ display: "block", marginBottom: "0.35rem" }}>Password</span>
+          <span>Password</span>
           <input
             type="password"
             autoComplete="current-password"
@@ -67,7 +71,7 @@ export function LoginForm({ onSubmit, onSwitchToSignup, loading, error }: LoginF
         <button
           type="button"
           onClick={onSwitchToSignup}
-          style={{ background: "transparent", border: "none", color: "#93c5fd" }}
+          className="link-button"
         >
           Create one
         </button>

@@ -19,14 +19,12 @@ function formatCurrency(value: number | null | undefined, currency?: string | nu
 export function Watchlist({ quotes, onRefresh, loading }: WatchlistProps) {
   return (
     <div className="card">
-      <div className="header" style={{ marginBottom: "1rem" }}>
+      <div className="header compact">
         <div>
-          <h2>Live market watchlist</h2>
-          <p style={{ color: "rgba(226,232,240,0.7)", margin: 0 }}>
-            Quotes powered by Yahoo Finance via yfinance. Values refresh on demand.
-          </p>
+          <h2>Market watchlist</h2>
+          <p>Live quotes from Yahoo Finance, refreshed on demand.</p>
         </div>
-        <button type="button" onClick={onRefresh} disabled={loading}>
+        <button type="button" className="button-ghost" onClick={onRefresh} disabled={loading}>
           {loading ? "Refreshing..." : "Refresh"}
         </button>
       </div>

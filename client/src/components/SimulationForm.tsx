@@ -48,17 +48,15 @@ export function SimulationForm({ onSubmit, loading }: SimulationFormProps) {
 
   return (
     <div className="card">
-      <h2>Create a new simulation</h2>
-      <p style={{ marginTop: "-0.5rem", color: "rgba(226,232,240,0.7)" }}>
-        Choose a ticker, investment amount, and strategy to launch a live-tracked simulation.
-      </p>
+      <h2>New simulation</h2>
+      <p className="hint">Pick a ticker, a strategy and your starting capital.</p>
 
       {validationError && <div className="error-banner">{validationError}</div>}
 
       <form onSubmit={handleSubmit} className="form-grid">
         <div className="flex-row">
           <label style={{ flex: "1 1 140px" }}>
-            <span style={{ display: "block", marginBottom: "0.35rem" }}>Symbol</span>
+            <span>Symbol</span>
             <input
               value={form.symbol}
               onChange={(event) => setForm((prev) => ({ ...prev, symbol: event.target.value }))}
@@ -68,7 +66,7 @@ export function SimulationForm({ onSubmit, loading }: SimulationFormProps) {
           </label>
 
           <label style={{ flex: "1 1 200px" }}>
-            <span style={{ display: "block", marginBottom: "0.35rem" }}>Strategy</span>
+            <span>Strategy</span>
             <input
               value={form.strategy}
               onChange={(event) => setForm((prev) => ({ ...prev, strategy: event.target.value }))}
@@ -77,7 +75,7 @@ export function SimulationForm({ onSubmit, loading }: SimulationFormProps) {
           </label>
 
           <label style={{ flex: "1 1 200px" }}>
-            <span style={{ display: "block", marginBottom: "0.35rem" }}>Starting capital (USD)</span>
+            <span>Starting capital (USD)</span>
             <input
               type="number"
               min={100}
@@ -91,7 +89,7 @@ export function SimulationForm({ onSubmit, loading }: SimulationFormProps) {
         </div>
 
         <label>
-          <span style={{ display: "block", marginBottom: "0.35rem" }}>Notes (optional)</span>
+          <span>Notes (optional)</span>
           <textarea
             rows={3}
             value={form.notes ?? ""}

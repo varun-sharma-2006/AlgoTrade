@@ -67,12 +67,12 @@ export function GoogleSignIn({ clientId, onCredential, disabled }: GoogleSignInP
           ux_mode: "popup",
         });
         google.renderButton(container.current, {
-          theme: "filled_blue",
+          theme: "outline",
           size: "large",
           shape: "pill",
-          text: "signin_with",
+          text: "continue_with",
           logo_alignment: "left",
-          width: 300,
+          width: 320,
         });
       })
       .catch((error: Error) => !cancelled && setLoadError(error.message));

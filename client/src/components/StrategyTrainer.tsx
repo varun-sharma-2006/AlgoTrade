@@ -91,7 +91,7 @@ export function StrategyTrainer({ onTrain, onPredict, training, prediction, load
   const equity = training?.sample.map((point) => ({ timestamp: point.timestamp, close: point.equity })) ?? [];
 
   return (
-    <section className="panel">
+    <section className="panel strategy-lab">
       <header>
         <h2>Strategy lab</h2>
         <span className="hint">Backtest a strategy on 2 years of daily data, fees included</span>
@@ -133,7 +133,7 @@ export function StrategyTrainer({ onTrain, onPredict, training, prediction, load
             type="button"
             onClick={() => onPredict(symbol)}
             disabled={loading || !training}
-            style={{ marginLeft: "0.5rem" }}
+            className="button-ghost"
           >
             {loading ? "Working..." : "Today's signal"}
           </button>
@@ -158,7 +158,7 @@ export function StrategyTrainer({ onTrain, onPredict, training, prediction, load
           {equity.length ? (
             <div className="equity-curve">
               <span className="subtle">Equity curve (last {equity.length} days, starts at 1.0)</span>
-              <SparklineChart points={equity} />
+              <SparklineChart points={equity} stretch />
             </div>
           ) : null}
           <Metrics metrics={training.metrics} />

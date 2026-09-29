@@ -105,11 +105,12 @@ export function VisitorsPage({ onLoad }: VisitorsPageProps) {
     <section className="visitors">
       <header className="header">
         <div>
+          <span className="eyebrow">Admin</span>
           <h1>Visitors</h1>
-          <p className="subtle">Everyone who has signed in with Google. Only admins can see this page.</p>
+          <p>Everyone who has signed in with Google. Only admins can see this page.</p>
         </div>
         <div className="actions">
-          <button type="button" onClick={downloadCsv} disabled={!data?.users.length}>
+          <button type="button" className="button-ghost" onClick={downloadCsv} disabled={!data?.users.length}>
             Export CSV
           </button>
           <button type="button" onClick={() => void refresh()} disabled={loading}>

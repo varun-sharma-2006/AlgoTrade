@@ -2,9 +2,11 @@ import { useMemo } from "react";
 
 interface SparklineChartProps {
   points: Array<{ timestamp: string; close: number }>;
+  /** Fill the container's width instead of the fixed 180px thumbnail size. */
+  stretch?: boolean;
 }
 
-export function SparklineChart({ points }: SparklineChartProps) {
+export function SparklineChart({ points, stretch = false }: SparklineChartProps) {
   // Hooks must run on every render, so this stays above the early return.
   const gradientId = useMemo(() => `sparkline-gradient-${Math.random().toString(36).slice(2)}`, []);
   if (!points.length) {
@@ -40,20 +42,34 @@ export function SparklineChart({ points }: SparklineChartProps) {
   });
 
   return (
-    <svg width={width} height={height} viewBox={`0 0 ${width} ${height}`} className="sparkline">
+    <svg
+      width={width}
+      height={height}
+      viewBox={`0 0 ${width} ${height}`}
+      className={stretch ? "sparkline stretch" : "sparkline"}
+      preserveAspectRatio={stretch ? "none" : undefined}
+    >
       <defs>
         <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor="rgba(96,165,250,0.4)" />
-          <stop offset="100%" stopColor="rgba(96,165,250,0)" />
+          <stop offset="0%" stopColor="rgba(212,175,106,0.35)" />
+          <stop offset="100%" stopColor="rgba(212,175,106,0)" />
         </linearGradient>
       </defs>
       {gridLines.map((line) => (
-        <line key={line.key} x1={0} x2={width} y1={line.y} y2={line.y} stroke="rgba(148,163,184,0.2)" strokeWidth={0.8} />
+        <line key={line.key} x1={0} x2={width} y1={line.y} y2={line.y} stroke="rgba(238,232,220,0.06)" strokeWidth={0.8} />
       ))}
       <path d={areaPath} fill={`url(#${gradientId})`} opacity={0.75} />
-      <path d={linePath} fill="none" stroke="#60a5fa" strokeWidth={2} strokeLinecap="round" />
-      <line x1={0} x2={width} y1={baselineY} y2={baselineY} stroke="rgba(96,165,250,0.25)" strokeDasharray="4 4" />
-      <circle cx={lastX} cy={lastY} r={3.6} fill="#f97316" stroke="#ffffff" strokeWidth={1.2} />
+      <path
+        d={linePath}
+        fill="none"
+        stroke="#e3c27f"
+        strokeWidth={1.8}
+        strokeLinecap="round"
+        vectorEffect="non-scaling-stroke"
+      />
+      <line x1={0} x2={width} y1={baselineY} y2={baselineY} stroke="rgba(212,175,106,0.22)" strokeDasharray="3 5" />
+      {/* A stretched (non-uniformly scaled) chart would squash the dot into an oval, so skip it there. */}
+      {stretch ? null : <circle cx={lastX} cy={lastY} r={3.6} fill="#f6dfa8" stroke="#0b0d14" strokeWidth={1.5} />}
     </svg>
   );
 }

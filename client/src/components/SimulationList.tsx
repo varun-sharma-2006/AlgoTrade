@@ -22,9 +22,7 @@ export function SimulationList({ simulations, onUpdate, onDelete, loading }: Sim
   return (
     <div className="card">
       <h2>Saved simulations</h2>
-      <p style={{ marginTop: "-0.5rem", color: "rgba(226,232,240,0.7)" }}>
-        All simulations are stored securely per user in MongoDB.
-      </p>
+      <p className="hint">Private to your account and saved between visits.</p>
 
       {simulations.length === 0 ? (
         <div className="empty-state">Launch your first simulation to see it listed here.</div>
@@ -53,25 +51,27 @@ export function SimulationList({ simulations, onUpdate, onDelete, loading }: Sim
                     currency: "USD",
                   })}
                 </td>
-                <td>{statusLabels[simulation.status] ?? simulation.status}</td>
+                <td>
+                  <span className={`status-pill ${simulation.status === "completed" ? "done" : "live"}`}>
+                    {statusLabels[simulation.status] ?? simulation.status}
+                  </span>
+                </td>
                 <td>{new Date(simulation.createdAt).toLocaleString()}</td>
                 <td>
                   <div className="flex-row">
                     <button
                       type="button"
                       disabled={loading}
+                      className="button-ghost"
                       onClick={() => handleToggleStatus(simulation)}
-                      style={{
-                        background: simulation.status === "completed" ? "#0ea5e9" : "#22c55e",
-                      }}
                     >
                       {simulation.status === "completed" ? "Reopen" : "Mark complete"}
                     </button>
                     <button
                       type="button"
                       disabled={loading}
+                      className="button-danger"
                       onClick={() => onDelete(simulation.id)}
-                      style={{ background: "#ef4444" }}
                     >
                       Remove
                     </button>

@@ -39,12 +39,11 @@ export function HomeOverview({
     <section className="home-overview">
       <header className="header">
         <div>
-          <h1>Welcome back, {user.name}</h1>
-          <p style={{ color: "rgba(226,232,240,0.7)", marginTop: "0.35rem" }}>
-            Your personalised snapshot across simulations, strategies, and live signals.
-          </p>
+          <span className="eyebrow">Overview</span>
+          <h1>Welcome back, {user.name.split(" ")[0]}</h1>
+          <p>Your personal snapshot across simulations, strategies and live signals.</p>
         </div>
-        <button type="button" onClick={onRefresh} disabled={loading}>
+        <button type="button" className="button-ghost" onClick={onRefresh} disabled={loading}>
           {loading ? "Refreshing..." : "Refresh"}
         </button>
       </header>

@@ -50,14 +50,10 @@ export function Dashboard({
     <main>
       <div className="header">
         <div>
-          <h1>Simulation workspace</h1>
-          <p style={{ color: "rgba(226,232,240,0.7)", margin: "0.4rem 0 0" }}>
-            Track real-time market moves, iterate on strategies, and manage experiments.
-          </p>
+          <span className="eyebrow">Workspace</span>
+          <h1>Simulations</h1>
+          <p>Track live market moves, backtest strategies, and manage your paper-trading experiments.</p>
         </div>
-        <button type="button" onClick={onLogout} style={{ background: "#ef4444" }}>
-          Log out
-        </button>
       </div>
 
       {error && <div className="error-banner">{error}</div>}

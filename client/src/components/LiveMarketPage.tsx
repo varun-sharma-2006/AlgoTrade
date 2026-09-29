@@ -46,20 +46,20 @@ function CandlestickChart({ points }: { points: ChartPoint[] }) {
     <svg className="candlestick" width={width} height={height} viewBox={`0 0 ${width} ${height}`}>
       <defs>
         <linearGradient id="close-gradient" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor="rgba(250,204,21,0.25)" />
-          <stop offset="100%" stopColor="rgba(250,204,21,0)" />
+          <stop offset="0%" stopColor="rgba(212,175,106,0.28)" />
+          <stop offset="100%" stopColor="rgba(212,175,106,0)" />
         </linearGradient>
       </defs>
       {gridLines.map((line) => (
         <g key={line.key} className="grid-line">
-          <line x1={0} x2={width} y1={line.y} y2={line.y} stroke="rgba(148,163,184,0.25)" strokeDasharray="6 6" />
-          <text x={4} y={line.y - 4} fill="rgba(148,163,184,0.8)" fontSize={10}>
+          <line x1={0} x2={width} y1={line.y} y2={line.y} stroke="rgba(238,232,220,0.07)" strokeDasharray="4 6" />
+          <text x={4} y={line.y - 4} fill="rgba(238,232,220,0.42)" fontSize={10}>
             {line.label}
           </text>
         </g>
       ))}
       <path d={`${closePath} L${width},${height} L0,${height} Z`} fill="url(#close-gradient)" opacity={0.7} />
-      <path d={closePath} fill="none" stroke="#facc15" strokeWidth={1.6} strokeLinecap="round" />
+      <path d={closePath} fill="none" stroke="#e3c27f" strokeWidth={1.6} strokeLinecap="round" />
       {candles.map((point, index) => {
         const x = projectX(index);
         const openY = projectY(point.open);
@@ -67,7 +67,7 @@ function CandlestickChart({ points }: { points: ChartPoint[] }) {
         const highY = projectY(point.high);
         const lowY = projectY(point.low);
         const bullish = point.close >= point.open;
-        const color = bullish ? "#22c55e" : "#ef4444";
+        const color = bullish ? "#5fd49a" : "#f07a7a";
         const rectY = bullish ? closeY : openY;
         const rectHeight = Math.max(Math.abs(closeY - openY), 1.8);
         return (
@@ -156,10 +156,9 @@ export function LiveMarketPage({ defaultSymbols, onSearch, onFetchChart }: LiveM
     <section className="live-market">
       <header className="header">
         <div>
-          <h1>Live market data</h1>
-          <p style={{ color: "rgba(226,232,240,0.7)", marginTop: "0.35rem" }}>
-            Search any ticker and inspect intraday trends with detailed candles and overlays.
-          </p>
+          <span className="eyebrow">Markets</span>
+          <h1>Live markets</h1>
+          <p>Search any stock, index or crypto and study its candles over any range.</p>
         </div>
       </header>
 

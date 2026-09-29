@@ -33,6 +33,16 @@ import { SignupForm } from "./components/SignupForm";
 import { GoogleLoginPage } from "./components/GoogleLoginPage";
 import { googleSignOut } from "./components/GoogleSignIn";
 import { VisitorsPage } from "./components/VisitorsPage";
+import {
+  ChatIcon,
+  HomeIcon,
+  LiveIcon,
+  LogoMark,
+  LogoutIcon,
+  SimulationsIcon,
+  StrategyIcon,
+  VisitorsIcon,
+} from "./components/Icons";
 import type {
   AuthConfig,
   ChatAction,
@@ -73,6 +83,15 @@ const LOGIN_BYPASS_ENABLED = isEnvFlagEnabled(import.meta.env.VITE_ENABLE_LOGIN_
 const LOGIN_BYPASS_EMAIL = import.meta.env.VITE_LOGIN_BYPASS_EMAIL;
 const LOGIN_BYPASS_NAME = import.meta.env.VITE_LOGIN_BYPASS_NAME;
 const LOGIN_BYPASS_PATH = "/dev/auth/bypass";
+
+const NAV_ITEMS: Array<{ page: Page; label: string; icon: typeof HomeIcon; adminOnly?: boolean }> = [
+  { page: "home", label: "Overview", icon: HomeIcon },
+  { page: "simulations", label: "Simulations", icon: SimulationsIcon },
+  { page: "chat", label: "Trading copilot", icon: ChatIcon },
+  { page: "strategies", label: "Strategies", icon: StrategyIcon },
+  { page: "live", label: "Live markets", icon: LiveIcon },
+  { page: "visitors", label: "Visitors", icon: VisitorsIcon, adminOnly: true },
+];
 
 function extractHistory(messages: ChatMessage[]): Array<{ role: "user" | "assistant"; content: string }> {
   return messages
@@ -489,6 +508,11 @@ export default function App() {
       .catch((meError) => handleAuthFailure(meError));
   }, [token, handleAuthFailure]);
 
+  // Each page starts at the top instead of inheriting the previous page's scroll position.
+  useEffect(() => {
+    window.scrollTo({ top: 0 });
+  }, [page]);
+
   const loadVisitors = useCallback(() => fetchVisitors(token ?? ""), [token]);
 
   const handleSearchSymbols = useCallback(
@@ -574,7 +598,8 @@ export default function App() {
   if (initializingBypass || (!authConfig && !token)) {
     return (
       <div className="splash">
-        Signing you in...
+        <LogoMark size={56} />
+        Preparing your workspace…
       </div>
     );
   }
@@ -669,9 +694,19 @@ export default function App() {
     <div className="app-shell">
       <aside className="sidebar">
         <div className="brand">
-          <strong>Algo Trade Simulator</strong>
+          <div className="brand-row">
+            <LogoMark size={40} />
+            <strong>
+              Algo Trade
+              <small>Simulator</small>
+            </strong>
+          </div>
           <div className="profile">
-            {user.picture ? <img className="avatar" src={user.picture} alt="" referrerPolicy="no-referrer" /> : null}
+            {user.picture ? (
+              <img className="avatar" src={user.picture} alt="" referrerPolicy="no-referrer" />
+            ) : (
+              <span className="avatar placeholder">{user.name.slice(0, 1).toUpperCase()}</span>
+            )}
             <div>
               <div>{user.name}</div>
               <span className="subtle">{user.email}</span>
@@ -679,46 +714,25 @@ export default function App() {
           </div>
         </div>
         <nav>
-          <button type="button" className={page === "home" ? "active" : ""} onClick={() => setPage("home")}>
-            Home
-          </button>
-          <button
-            type="button"
-            className={page === "simulations" ? "active" : ""}
-            onClick={() => setPage("simulations")}
-          >
-            Simulations
-          </button>
-          <button type="button" className={page === "chat" ? "active" : ""} onClick={() => setPage("chat")}>
-            Chatbot
-          </button>
-          <button
-            type="button"
-            className={page === "strategies" ? "active" : ""}
-            onClick={() => setPage("strategies")}
-          >
-            Strategy info
-          </button>
-          <button
-            type="button"
-            className={page === "live" ? "active" : ""}
-            onClick={() => setPage("live")}
-          >
-            Live data
-          </button>
-          {user.isAdmin ? (
+          <span className="nav-label">Workspace</span>
+          {NAV_ITEMS.filter((item) => !item.adminOnly || user.isAdmin).map(({ page: target, label, icon: NavIcon }) => (
             <button
+              key={target}
               type="button"
-              className={page === "visitors" ? "active" : ""}
-              onClick={() => setPage("visitors")}
+              className={page === target ? "active" : ""}
+              aria-current={page === target ? "page" : undefined}
+              onClick={() => setPage(target)}
             >
-              Visitors
+              <NavIcon />
+              {label}
             </button>
-          ) : null}
+          ))}
         </nav>
-        <button type="button" className="logout" onClick={handleLogout}>
+        <button type="button" className="logout button-ghost" onClick={handleLogout}>
+          <LogoutIcon />
           Log out
         </button>
+        <p className="sidebar-footnote">For education only · not financial advice</p>
       </aside>
       <main className="content">
         {error && page !== "simulations" ? <div className="error-banner">{error}</div> : null}

@@ -1,3 +1,4 @@
+import { LogoMark } from "./Icons";
 import { FormEvent, useState } from "react";
 
 interface SignupFormProps {
@@ -44,8 +45,11 @@ export function SignupForm({ onSubmit, onSwitchToLogin, loading, error }: Signup
 
   return (
     <div className="card auth-card">
+      <div className="login-card-logo">
+        <LogoMark size={48} />
+      </div>
       <h1>Create your account</h1>
-      <p style={{ textAlign: "center", marginTop: "0.3rem", color: "rgba(226,232,240,0.7)" }}>
+      <p className="auth-lede">
         Build and monitor personalised trading simulations.
       </p>
 
@@ -54,7 +58,7 @@ export function SignupForm({ onSubmit, onSwitchToLogin, loading, error }: Signup
 
       <form onSubmit={handleSubmit} noValidate>
         <label>
-          <span style={{ display: "block", marginBottom: "0.35rem" }}>Name</span>
+          <span>Name</span>
           <input
             value={name}
             onChange={(event) => setName(event.target.value)}
@@ -64,7 +68,7 @@ export function SignupForm({ onSubmit, onSwitchToLogin, loading, error }: Signup
         </label>
 
         <label>
-          <span style={{ display: "block", marginBottom: "0.35rem" }}>Email</span>
+          <span>Email</span>
           <input
             value={email}
             onChange={(event) => setEmail(event.target.value)}
@@ -75,7 +79,7 @@ export function SignupForm({ onSubmit, onSwitchToLogin, loading, error }: Signup
         </label>
 
         <label>
-          <span style={{ display: "block", marginBottom: "0.35rem" }}>Password</span>
+          <span>Password</span>
           <input
             type="password"
             value={password}
@@ -96,7 +100,7 @@ export function SignupForm({ onSubmit, onSwitchToLogin, loading, error }: Signup
         <button
           type="button"
           onClick={onSwitchToLogin}
-          style={{ background: "transparent", border: "none", color: "#93c5fd" }}
+          className="link-button"
         >
           Sign in instead
         </button>

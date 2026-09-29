@@ -31,8 +31,9 @@ export function ChatbotPanel({ messages, loading, onSend }: ChatbotPanelProps) {
   return (
     <section className="chatbot">
       <header>
+        <span className="eyebrow">AI copilot</span>
         <h2>Trading copilot</h2>
-        <span className="hint">Ask strategy questions, get market colour, or automate simulations</span>
+        <span className="hint">Ask about any stock or strategy. Answers use live market data.</span>
       </header>
 
       <div className="chat-window" ref={containerRef}>
@@ -71,7 +72,7 @@ export function ChatbotPanel({ messages, loading, onSend }: ChatbotPanelProps) {
         <input
           value={input}
           onChange={(event) => setInput(event.target.value)}
-          placeholder={loading ? "Waiting for assistant..." : "Ask about a symbol, strategy, or create a simulation"}
+          placeholder={loading ? "Thinking…" : "Ask about any stock, strategy or market move…"}
           disabled={loading}
         />
         <button type="submit" disabled={loading || !input.trim()}>

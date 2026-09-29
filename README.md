@@ -12,6 +12,8 @@ Live market data comes from Yahoo Finance, and a trading copilot answers questio
 
 **Live demo: [algo-trade-mu.vercel.app](https://algo-trade-mu.vercel.app)** (signs you in automatically as a demo user)
 
+![Sign in](docs/screenshots/login.png)
+
 ![Dashboard](docs/screenshots/dashboard.png)
 
 ## Features
@@ -33,7 +35,9 @@ Live market data comes from Yahoo Finance, and a trading copilot answers questio
 | --- | --- |
 | ![Strategy lab](docs/screenshots/strategy-lab.png) | ![Chatbot](docs/screenshots/chatbot.png) |
 
-![Live data](docs/screenshots/live-data.png)
+| Live markets | Strategies |
+| --- | --- |
+| ![Live data](docs/screenshots/live-data.png) | ![Strategies](docs/screenshots/strategies.png) |
 
 ## Architecture
 
