@@ -10,6 +10,8 @@ A full-stack paper-trading and backtesting platform. Pick a stock, choose a stra
 really have traded over the last two years, fees included, compared with simply buying and holding.
 Live market data comes from Yahoo Finance, and a trading copilot answers questions using real prices.
 
+**Live demo: [algo-trade-mu.vercel.app](https://algo-trade-mu.vercel.app)** (signs you in automatically as a demo user)
+
 ![Dashboard](docs/screenshots/dashboard.png)
 
 ## Features
