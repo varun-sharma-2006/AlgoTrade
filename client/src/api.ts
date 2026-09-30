@@ -20,6 +20,8 @@ import type {
   CustomStrategy,
   PortfolioResponse,
   StrategyRules,
+  WalkForwardPayload,
+  WalkForwardResult,
 } from "./types";
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
@@ -194,6 +196,10 @@ export function fetchStrategies() {
 
 export function trainStrategy(token: string, payload: TrainingPayload) {
   return request<TrainingResult>("/analytics/train", { method: "POST", body: payload, token });
+}
+
+export function runWalkForward(token: string, payload: WalkForwardPayload) {
+  return request<WalkForwardResult>("/analytics/walk-forward", { method: "POST", body: payload, token });
 }
 
 export function predictStrategy(

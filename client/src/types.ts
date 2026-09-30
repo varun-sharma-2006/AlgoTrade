@@ -166,9 +166,33 @@ export interface OverviewResponse {
   strategiesTrained: string[];
 }
 
+/** Return and risk statistics for one equity curve (annualised, risk-free rate 0). */
+export interface RiskStats {
+  totalReturn: number;
+  annualizedReturn: number;
+  volatility: number;
+  sharpe: number;
+  sortino: number;
+  maxDrawdown: number;
+  calmar: number;
+}
+
+export interface BenchmarkStats extends RiskStats {
+  symbol: string;
+  name: string;
+  /** The strategy's sensitivity to the index, its excess annual return and its correlation. */
+  beta: number;
+  alpha: number;
+  correlation: number;
+}
+
 export interface StrategyMetrics {
   totalReturn: number;
   annualizedReturn: number;
+  volatility?: number;
+  sortino?: number;
+  calmar?: number;
+  slippageBps?: number;
   buyHoldReturn: number;
   excessReturn: number;
   winRate: number;
@@ -181,7 +205,7 @@ export interface StrategyMetrics {
   feeBps: number;
 }
 
-export type StrategyId = "sma-crossover" | "mean-reversion" | "trend-follow" | "buy-hold" | "custom";
+export type StrategyId = "sma-crossover" | "mean-reversion" | "trend-follow" | "ml-logistic" | "buy-hold" | "custom";
 
 export interface TrainingPayload {
   symbol: string;
@@ -191,7 +215,10 @@ export interface TrainingPayload {
   lookback?: number;
   deviation?: number;
   channel?: number;
+  threshold?: number;
+  trainWindow?: number;
   rules?: StrategyRules;
+  slippageBps?: number;
 }
 
 export interface BacktestTrade {
@@ -208,11 +235,89 @@ export interface TrainingResult {
   parameters: Record<string, number>;
   rules?: StrategyRules | null;
   metrics: StrategyMetrics;
+  buyHold?: RiskStats;
+  benchmark?: BenchmarkStats | null;
+  model?: ModelReport;
   trades: BacktestTrade[];
   openTrade: BacktestTrade | null;
-  sample: Array<{ timestamp: string; close: number; equity: number; position: number } & Record<string, number | string>>;
+  sample: Array<
+    {
+      timestamp: string;
+      close: number;
+      equity: number;
+      position: number;
+      buyHold?: number;
+      drawdown?: number;
+      buyHoldDrawdown?: number;
+    } & Record<string, number | string | null | undefined>
+  >;
   period: { start: string; end: string; days: number };
   trainedAt: string;
+}
+
+/** Out-of-sample quality of the machine-learning strategy's predictions. */
+export interface ModelReport {
+  model: string;
+  predictions: number;
+  accuracy: number;
+  baselineAccuracy: number;
+  upDays: number;
+  auc: number | null;
+  precisionWhenLong: number | null;
+  daysLong: number;
+  threshold: number;
+  trainWindow: number;
+  retrainEvery: number;
+  refits: number;
+  latestProbability: number | null;
+  featureWeights: Array<{ feature: string; weight: number }>;
+}
+
+export type WalkForwardStrategyId = "sma-crossover" | "mean-reversion" | "trend-follow" | "ml-logistic";
+
+export interface WalkForwardPayload {
+  symbol: string;
+  strategyId: WalkForwardStrategyId;
+  slippageBps?: number;
+}
+
+export interface WalkForwardFold {
+  trainStart: string;
+  testStart: string;
+  testEnd: string;
+  params: Record<string, number>;
+  trainSharpe: number;
+  trainReturn: number;
+  testReturn: number;
+  buyHoldReturn: number;
+  trades: number;
+}
+
+export interface WalkForwardResult {
+  symbol: string;
+  strategyId: WalkForwardStrategyId;
+  trainDays: number;
+  testDays: number;
+  gridSize: number;
+  folds: WalkForwardFold[];
+  curve: Array<{ timestamp: string; equity: number; buyHold: number; drawdown: number }>;
+  metrics: {
+    outOfSampleReturn: number;
+    outOfSampleAnnualized: number;
+    outOfSampleSharpe: number;
+    outOfSampleMaxDrawdown: number;
+    inSampleAnnualized: number;
+    buyHoldReturn: number;
+    buyHoldAnnualized: number;
+    buyHoldSharpe: number;
+    foldsBeatBuyHold: number;
+    mostChosenParams: Record<string, number>;
+    mostChosenCount: number;
+    costBps: number;
+  };
+  period: { start: string; end: string; days: number };
+  feeBps: number;
+  slippageBps: number;
 }
 
 export interface PredictionResult {

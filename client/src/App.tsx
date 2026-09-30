@@ -22,6 +22,7 @@ import {
   predictStrategy,
   signup,
   trainStrategy,
+  runWalkForward,
   updateSimulation,
   askChat,
   type AuthResponse,
@@ -66,6 +67,7 @@ import type {
   StrategyDefinition,
   TrainingPayload,
   TrainingResult,
+  WalkForwardPayload,
   SparklineSeries,
   User,
 } from "./types";
@@ -541,6 +543,10 @@ export default function App() {
       });
   }, [token, handleAuthFailure]);
 
+  const handleWalkForward = useCallback(
+    (payload: WalkForwardPayload) => runWalkForward(token ?? "", payload),
+    [token],
+  );
   const handleBuilderBacktest = useCallback(
     (symbol: string, rules: StrategyRules) => trainStrategy(token ?? "", { symbol, strategyId: "custom", rules }),
     [token],
@@ -709,6 +715,7 @@ export default function App() {
             onDeleteSimulation={handleDeleteSimulation}
             onTrainStrategy={handleTrainStrategy}
             onPredictStrategy={handlePredictStrategy}
+            onWalkForward={handleWalkForward}
             recentTraining={trainingResult}
             recentPrediction={predictionResult}
             onLogout={handleLogout}

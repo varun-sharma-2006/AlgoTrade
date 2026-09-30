@@ -17,7 +17,7 @@ router = APIRouter(tags=["portfolio"])
 
 def _chart(symbol: str) -> dict[str, Any] | None:
     try:
-        return fetch_chart(symbol, range_value="2y", interval="1d")
+        return fetch_chart(symbol, range_value=settings.history_period, interval="1d")
     except HTTPException:
         logger.warning("No price history for %s", symbol)
         return None
@@ -47,7 +47,7 @@ def _position(sim: dict[str, Any], chart: dict[str, Any] | None) -> dict[str, An
         rules=sim.get("rules"),
         start_date=sim.get("startDate") or str(sim["createdAt"])[:10],
         capital=base["startingCapital"],
-        fee_bps=settings.trading_fee_bps,
+        fee_bps=settings.trading_fee_bps + settings.slippage_bps,
     )
     return base | valued
 

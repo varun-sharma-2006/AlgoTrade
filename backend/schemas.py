@@ -92,8 +92,19 @@ class TrainingPayload(BaseModel):
     deviation: float = Field(default=2.0, gt=0, le=5)
     # Trend-following breakout
     channel: int = Field(default=20, ge=5, le=200)
+    # Machine learning (logistic regression)
+    threshold: float = Field(default=0.52, ge=0.3, le=0.8)
+    trainWindow: int = Field(default=504, ge=126, le=1000)
     # Strategy Builder ("custom")
     rules: StrategyRules | None = None
+    # Extra cost per trade on top of the fee; defaults to the server's SLIPPAGE_BPS.
+    slippageBps: float | None = Field(default=None, ge=0, le=100)
+
+
+class WalkForwardPayload(BaseModel):
+    symbol: str = Field(min_length=1, max_length=20)
+    strategyId: Literal["sma-crossover", "mean-reversion", "trend-follow", "ml-logistic"] = "sma-crossover"
+    slippageBps: float | None = Field(default=None, ge=0, le=100)
 
 
 class PredictionPayload(BaseModel):

@@ -9,6 +9,8 @@ rather than from the underlying stock.
 from __future__ import annotations
 
 import math
+import re
+from datetime import date, timedelta
 from typing import Any
 
 STRATEGIES: list[dict[str, Any]] = [
@@ -34,6 +36,13 @@ STRATEGIES: list[dict[str, Any]] = [
         "parameters": [{"name": "channel", "value": "20"}],
     },
     {
+        "id": "ml-logistic",
+        "name": "Machine learning (logistic regression)",
+        "description": "Predicts tomorrow's direction from 8 price features, retrained monthly on past data only. Long while the predicted chance of a rise is at least the threshold.",
+        "recommendedFor": ["machine learning", "research"],
+        "parameters": [{"name": "threshold", "value": "0.52"}, {"name": "trainWindow", "value": "504"}],
+    },
+    {
         "id": "buy-hold",
         "name": "Buy & hold",
         "description": "Buy on day one and never sell. The baseline every other strategy has to beat.",
@@ -47,6 +56,7 @@ DEFAULT_PARAMS: dict[str, dict[str, float]] = {
     "sma-crossover": {"shortWindow": 20, "longWindow": 60},
     "mean-reversion": {"lookback": 20, "deviation": 2.0},
     "trend-follow": {"channel": 20},
+    "ml-logistic": {"threshold": 0.52, "trainWindow": 504},
     "buy-hold": {},
     "custom": {},
 }
@@ -98,6 +108,11 @@ def validate(strategy_id: str, params: dict[str, float], rules: dict[str, Any] |
         return "shortWindow must be less than longWindow"
     if strategy_id == "custom" and not (rules and rules.get("entry")):
         return "A custom strategy needs at least one entry rule"
+    if strategy_id == "ml-logistic":
+        if not 0.3 <= params["threshold"] <= 0.8:
+            return "threshold must be between 0.3 and 0.8"
+        if not 126 <= params["trainWindow"] <= 1000:
+            return "trainWindow must be between 126 and 1000 days"
     return None
 
 
@@ -112,7 +127,29 @@ def warmup(strategy_id: str, params: dict[str, float], rules: dict[str, Any] | N
         return rule_engine.warmup(rules or {"entry": []})
     if strategy_id == "buy-hold":
         return 1
+    if strategy_id == "ml-logistic":
+        from backend import ml
+
+        return ml.warmup()
     return int(params[WARMUP_PARAM[strategy_id]])
+
+
+def evaluation_start(timestamps: list[str], days: int) -> int:
+    """Index of the first bar within the last `days` calendar days; earlier bars only warm up indicators."""
+    try:
+        last = date.fromisoformat(timestamps[-1][:10])
+    except (IndexError, ValueError):
+        return 0
+    cutoff = (last - timedelta(days=days)).isoformat()
+    return next((i for i, ts in enumerate(timestamps) if ts[:10] >= cutoff), 0)
+
+
+def period_days(period: str) -> int:
+    """Calendar days in a Yahoo-style period such as "2y", "6mo" or "90d"."""
+    match = re.fullmatch(r"(\d+)(y|mo|d)", period.strip())
+    if not match:
+        return 730
+    return int(match.group(1)) * {"y": 365, "mo": 30, "d": 1}[match.group(2)]
 
 
 def signals(
@@ -129,6 +166,11 @@ def signals(
         from backend import rules as rule_engine
 
         return rule_engine.signals(closes, rules or {"entry": []})
+
+    if strategy_id == "ml-logistic":
+        from backend import ml
+
+        return ml.signals(closes, params)
 
     if strategy_id == "sma-crossover":
         short = moving_average(closes, int(params["shortWindow"]))
@@ -177,6 +219,53 @@ def signals(
     raise ValueError(f"Unknown strategy {strategy_id}")
 
 
+def simulate(
+    closes: list[float],
+    target: list[int],
+    start: int,
+    end: int,
+    cost_bps: float,
+    *,
+    held: int = 0,
+    value: float = 1.0,
+) -> dict[str, Any]:
+    """Trade `target` over bars start..end (inclusive), starting with `value` and position `held`.
+
+    The position decided at a bar's close is held through the next bar, and every switch pays `cost_bps`
+    (fee plus slippage) on the traded value.
+    """
+    cost = cost_bps / 10_000
+    equity: list[float] = []
+    daily_returns: list[float] = []
+    trades: list[tuple[int, float, int, float]] = []  # (entry index, value before entry, exit index, exit value)
+    entry: tuple[int, float] | None = (start, value) if held else None
+    days_in_market = 0
+    for t in range(start, end + 1):
+        before = value
+        if t > start and held:
+            value *= closes[t] / closes[t - 1]
+            days_in_market += 1
+        if target[t] != held:
+            if target[t]:
+                entry = (t, value)  # equity before the entry cost, so trade returns include both sides
+            value *= 1 - cost
+            if not target[t] and entry is not None:
+                trades.append((entry[0], entry[1], t, value))
+                entry = None
+            held = target[t]
+        if t > start:
+            daily_returns.append(value / before - 1)
+        equity.append(value)
+    return {
+        "equity": equity,
+        "dailyReturns": daily_returns,
+        "trades": trades,
+        "entry": entry,
+        "held": held,
+        "daysInMarket": days_in_market,
+    }
+
+
 def backtest(
     closes: list[float],
     timestamps: list[str],
@@ -184,85 +273,79 @@ def backtest(
     params: dict[str, float],
     fee_bps: float = 10.0,
     rules: dict[str, Any] | None = None,
+    *,
+    slippage_bps: float = 0.0,
+    start: int = 0,
+    benchmark: tuple[list[str], list[float]] | None = None,
 ) -> dict[str, Any]:
-    fee = fee_bps / 10_000
+    """Backtest bars start..end. Bars before `start` only warm up indicators; the money starts in cash."""
+    from backend import risk
+
     target, indicators = signals(strategy_id, closes, params, rules)
-    equity = [1.0]
-    daily_returns: list[float] = []
-    trades: list[dict[str, Any]] = []
-    entry: tuple[int, float] | None = None  # (index, equity at entry)
-    days_in_market = 0
+    last = len(closes) - 1
+    run = simulate(closes, target, start, last, fee_bps + slippage_bps)
+    equity = run["equity"]
+    trades = [_trade(i, v, j, w, closes, timestamps) for i, v, j, w in run["trades"]]
+    open_trade = _trade(*run["entry"], last, equity[-1], closes, timestamps) if run["entry"] else None
 
-    for t in range(1, len(closes)):
-        held = target[t - 1]  # decided at yesterday's close, held through today
-        value = equity[-1] * (closes[t] / closes[t - 1] if held else 1.0)
-        days_in_market += held
-        if target[t] != target[t - 1]:
-            if target[t]:
-                entry = (t, value)  # equity before the entry fee, so trade returns include both fees
-                value *= 1 - fee
-            else:
-                value *= 1 - fee
-                if entry is not None:
-                    trades.append(_trade(entry, t, value, closes, timestamps))
-                entry = None
-        daily_returns.append(value / equity[-1] - 1)
-        equity.append(value)
-    # Warm-up days are always flat, so target[0] is 0 and every position has an entry above.
-    open_trade = _trade(entry, len(closes) - 1, equity[-1], closes, timestamps) if entry else None
-
-    periods = max(len(closes) - 1, 1)
-    total_return = equity[-1] - 1
-    mean = sum(daily_returns) / len(daily_returns) if daily_returns else 0.0
-    var = sum((r - mean) ** 2 for r in daily_returns) / max(len(daily_returns) - 1, 1) if daily_returns else 0.0
+    # Measured from the starting capital (1.0), so a cost paid on the first bar counts.
+    stats = risk.summary(run["dailyReturns"], [1.0, *equity])
+    stats["annualizedReturn"] = risk.annualise(stats["totalReturn"], max(last - start, 1))
+    buy_hold_equity = [closes[t] / closes[start] for t in range(start, last + 1)]
+    buy_hold = risk.summary(
+        [buy_hold_equity[k] / buy_hold_equity[k - 1] - 1 for k in range(1, len(buy_hold_equity))], buy_hold_equity
+    )
     wins = [tr for tr in trades if tr["return"] > 0]
-    buy_hold = closes[-1] / closes[0] - 1 if closes and closes[0] else 0.0
     metrics = {
-        "totalReturn": total_return,
-        "annualizedReturn": (1 + total_return) ** (252 / periods) - 1 if total_return > -1 else -1.0,
-        "buyHoldReturn": buy_hold,
-        "excessReturn": total_return - buy_hold,
+        **stats,
+        "buyHoldReturn": buy_hold["totalReturn"],
+        "excessReturn": stats["totalReturn"] - buy_hold["totalReturn"],
         "winRate": len(wins) / len(trades) if trades else 0.0,
         "trades": len(trades) + (1 if open_trade else 0),
         "closedTrades": len(trades),
         "avgTradeReturn": sum(tr["return"] for tr in trades) / len(trades) if trades else 0.0,
-        "sharpe": mean / math.sqrt(var) * math.sqrt(252) if var > 0 else 0.0,
-        "maxDrawdown": compute_drawdown(equity),
-        "exposure": days_in_market / periods,
+        "exposure": run["daysInMarket"] / max(last - start, 1),
         "feeBps": fee_bps,
+        "slippageBps": slippage_bps,
     }
 
-    start = max(len(closes) - 120, 0)
+    index = risk.benchmark(timestamps[start:], equity, *benchmark) if benchmark else None
+    drawdown = risk.drawdowns(equity)
+    buy_hold_drawdown = risk.drawdowns(buy_hold_equity)
     sample = []
-    for i in range(start, len(closes)):
+    for k, i in enumerate(range(start, last + 1)):
         point: dict[str, Any] = {
             "timestamp": timestamps[i],
             "close": closes[i],
-            "equity": equity[i],
+            "equity": equity[k],
+            "buyHold": buy_hold_equity[k],
+            "drawdown": drawdown[k],
+            "buyHoldDrawdown": buy_hold_drawdown[k],
             "position": target[i],
         }
         for name, line in indicators.items():
-            point[name] = line[i] if line[i] is not None else closes[i]
+            point[name] = line[i] if line[i] is not None else (None if name == "probUp" else closes[i])
         sample.append(point)
     return {
         "metrics": metrics,
+        "buyHold": buy_hold,
+        "benchmark": index,
         "trades": trades[-10:],
         "openTrade": open_trade,
         "sample": sample,
-        "period": {"start": timestamps[0], "end": timestamps[-1], "days": len(closes)},
+        "period": {"start": timestamps[start], "end": timestamps[last], "days": last - start + 1},
     }
 
 
 def _trade(
-    entry: tuple[int, float], exit_index: int, exit_value: float, closes: list[float], timestamps: list[str]
+    entry_index: int, entry_value: float, exit_index: int, exit_value: float, closes: list[float], timestamps: list[str]
 ) -> dict[str, Any]:
-    index, value = entry
     return {
-        "entryDate": timestamps[index],
-        "entryPrice": closes[index],
+        "entryDate": timestamps[entry_index],
+        "entryPrice": closes[entry_index],
         "exitDate": timestamps[exit_index],
         "exitPrice": closes[exit_index],
-        "return": exit_value / value - 1 if value else 0.0,
+        "return": exit_value / entry_value - 1 if entry_value else 0.0,
     }
 
 
@@ -277,6 +360,17 @@ def current_signal(
     if strategy_id == "buy-hold":
         strength = 1.0
         detail = f"Buy & hold stays invested; the last close was {price:.2f}."
+    elif strategy_id == "ml-logistic":
+        probability = indicators["probUp"][-1]
+        threshold = float(params["threshold"])
+        if probability is None:
+            strength, detail = 0.0, "Not enough history to train the model yet."
+        else:
+            strength = abs(probability - threshold) * 10
+            detail = (
+                f"The model puts the chance of a higher close tomorrow at {probability * 100:.1f}% "
+                f"(it buys at {threshold * 100:.0f}% or more)."
+            )
     elif strategy_id == "custom":
         from backend import rules as rule_engine
 

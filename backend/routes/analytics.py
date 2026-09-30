@@ -1,15 +1,17 @@
 from __future__ import annotations
 
+import asyncio
+import time
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
 
-from backend import strategies
-from backend.config import settings
+from backend import ml, risk, strategies, walkforward
+from backend.config import logger, settings
 from backend.deps import get_current_user, get_db
 from backend.market import WATCHLIST_SYMBOLS, fetch_chart
 from backend.routes.market import parse_symbols
-from backend.schemas import PredictionPayload, TrainingPayload
+from backend.schemas import PredictionPayload, TrainingPayload, WalkForwardPayload
 from backend.stores import Store, now, serialize_mongo_doc
 
 router = APIRouter(tags=["analytics"])
@@ -63,34 +65,127 @@ async def get_sparkline(symbols: str | None = None) -> list[dict[str, Any]]:
     return series
 
 
+BENCHMARK_CACHE_SECONDS = 600
+_benchmark_cache: dict[str, tuple[float, tuple[list[str], list[float]] | None]] = {}
+
+
+def history(symbol: str) -> tuple[list[float], list[str]]:
+    """Daily closes and timestamps over HISTORY_PERIOD (the backtest window plus warm-up and training data)."""
+    chart = fetch_chart(symbol, range_value=settings.history_period, interval="1d")
+    return [p["close"] for p in chart["points"]], [p["timestamp"] for p in chart["points"]]
+
+
+def benchmark_history() -> tuple[list[str], list[float]] | None:
+    cached = _benchmark_cache.get("index")
+    if cached and time.time() - cached[0] < BENCHMARK_CACHE_SECONDS:
+        return cached[1]
+    try:
+        closes, timestamps = history(risk.BENCHMARK_SYMBOL)
+        data: tuple[list[str], list[float]] | None = (timestamps, closes)
+    except HTTPException:
+        logger.warning("Benchmark %s unavailable", risk.BENCHMARK_SYMBOL)
+        data = None
+    _benchmark_cache["index"] = (time.time(), data)
+    return data
+
+
+def backtest_on(
+    symbol: str,
+    closes: list[float],
+    timestamps: list[str],
+    strategy_id: str,
+    params: dict[str, float],
+    rules: dict[str, Any] | None = None,
+    slippage_bps: float | None = None,
+    bench: tuple[list[str], list[float]] | None = None,
+) -> dict[str, Any]:
+    problem = strategies.validate(strategy_id, params, rules)
+    if problem:
+        raise HTTPException(status_code=422, detail=problem)
+    if len(closes) < strategies.warmup(strategy_id, params, rules) + 30:
+        raise HTTPException(status_code=422, detail="Not enough price history for these parameters")
+    start = strategies.evaluation_start(timestamps, strategies.period_days(settings.backtest_period))
+    slippage = settings.slippage_bps if slippage_bps is None else slippage_bps
+    report = strategies.backtest(
+        closes,
+        timestamps,
+        strategy_id,
+        params,
+        settings.trading_fee_bps,
+        rules,
+        slippage_bps=slippage,
+        start=start,
+        benchmark=bench,
+    )
+    if strategy_id == "ml-logistic":
+        report["model"] = ml.report(closes, params, start)
+    return {"symbol": symbol.upper(), "strategyId": strategy_id, "parameters": params, "rules": rules, **report}
+
+
+def run_backtest(
+    symbol: str,
+    strategy_id: str,
+    params: dict[str, float],
+    rules: dict[str, Any] | None = None,
+    slippage_bps: float | None = None,
+) -> dict[str, Any]:
+    closes, timestamps = history(symbol)
+    return backtest_on(symbol, closes, timestamps, strategy_id, params, rules, slippage_bps, benchmark_history())
+
+
+def compare_strategies(symbol: str, slippage_bps: float | None = None) -> list[dict[str, Any]]:
+    """Every built-in strategy with default settings on one symbol, best Sharpe first."""
+    closes, timestamps = history(symbol)
+    bench = benchmark_history()
+    results = []
+    for strategy_id, params in strategies.DEFAULT_PARAMS.items():
+        if strategy_id == "custom":
+            continue
+        try:
+            results.append(backtest_on(symbol, closes, timestamps, strategy_id, params, None, slippage_bps, bench))
+        except HTTPException as exc:
+            logger.info("Skipping %s for %s: %s", strategy_id, symbol, exc.detail)
+    results.sort(key=lambda r: r["metrics"]["sharpe"], reverse=True)
+    return results
+
+
+def run_walk_forward(symbol: str, strategy_id: str, slippage_bps: float | None = None) -> dict[str, Any]:
+    if strategy_id not in walkforward.GRIDS:
+        raise HTTPException(status_code=422, detail="Walk-forward testing needs a strategy with parameters to tune")
+    closes, timestamps = history(symbol)
+    slippage = settings.slippage_bps if slippage_bps is None else slippage_bps
+    try:
+        result = walkforward.run(closes, timestamps, strategy_id, settings.trading_fee_bps + slippage)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return {"symbol": symbol.upper(), **result, "feeBps": settings.trading_fee_bps, "slippageBps": slippage}
+
+
 @router.post("/analytics/train")
 async def train_strategy(
     payload: TrainingPayload, user: dict[str, Any] = Depends(get_current_user), store: Store = Depends(get_db)
 ) -> dict[str, Any]:
     params = strategy_params(payload)
     rules = payload.rules.model_dump() if payload.rules else None
-    problem = strategies.validate(payload.strategyId, params, rules)
-    if problem:
-        raise HTTPException(status_code=422, detail=problem)
-    chart = fetch_chart(payload.symbol, range_value=settings.backtest_period, interval="1d")
-    closes = [point["close"] for point in chart["points"]]
-    if len(closes) < strategies.warmup(payload.strategyId, params, rules) + 30:
-        raise HTTPException(status_code=422, detail="Not enough price history for these parameters")
-    timestamps = [point["timestamp"] for point in chart["points"]]
-    report = strategies.backtest(closes, timestamps, payload.strategyId, params, settings.trading_fee_bps, rules)
+    report = await asyncio.to_thread(
+        run_backtest, payload.symbol, payload.strategyId, params, rules, payload.slippageBps
+    )
     result = {
-        "symbol": payload.symbol.upper(),
-        "strategyId": payload.strategyId,
-        "parameters": params,
-        "rules": rules,
+        **report,
         # Kept for clients that read the SMA windows directly.
         "shortWindow": payload.shortWindow,
         "longWindow": payload.longWindow,
-        **report,
         "trainedAt": now().isoformat(),
     }
-    await store.record_training(user["id"], payload.symbol, payload.strategyId, result)
+    # The daily series is only needed for the response, not to remember which strategy was trained.
+    stored = {key: value for key, value in result.items() if key != "sample"}
+    await store.record_training(user["id"], payload.symbol, payload.strategyId, stored)
     return result
+
+
+@router.post("/analytics/walk-forward", dependencies=[Depends(get_current_user)])
+async def walk_forward(payload: WalkForwardPayload) -> dict[str, Any]:
+    return await asyncio.to_thread(run_walk_forward, payload.symbol, payload.strategyId, payload.slippageBps)
 
 
 @router.post("/analytics/predict")
@@ -114,8 +209,7 @@ async def predict(
     problem = strategies.validate(strategy_id, params, rules)
     if problem:
         raise HTTPException(status_code=422, detail=problem)
-    chart = fetch_chart(payload.symbol, range_value="1y", interval="1d")
-    closes = [point["close"] for point in chart["points"]]
+    closes, _ = history(payload.symbol)
     if len(closes) < strategies.warmup(strategy_id, params, rules) + 2:
         raise HTTPException(status_code=422, detail="Not enough data for prediction")
     outlook = strategies.current_signal(strategy_id, closes, params, rules)

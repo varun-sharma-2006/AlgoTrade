@@ -8,6 +8,8 @@ import type {
   TrainingResult,
   PredictionResult,
   User,
+  WalkForwardPayload,
+  WalkForwardResult,
 } from "../types";
 import { SimulationForm } from "./SimulationForm";
 import { SimulationList } from "./SimulationList";
@@ -24,6 +26,7 @@ interface DashboardProps {
   onDeleteSimulation: (id: string) => Promise<void> | void;
   onTrainStrategy: (payload: TrainingPayload) => Promise<void> | void;
   onPredictStrategy: (symbol: string) => Promise<void> | void;
+  onWalkForward?: (payload: WalkForwardPayload) => Promise<WalkForwardResult>;
   recentTraining: TrainingResult | null;
   recentPrediction: PredictionResult | null;
   onLogout: () => void;
@@ -42,6 +45,7 @@ export function Dashboard({
   onDeleteSimulation,
   onTrainStrategy,
   onPredictStrategy,
+  onWalkForward,
   recentTraining,
   recentPrediction,
   onLogout,
@@ -67,6 +71,7 @@ export function Dashboard({
         <StrategyTrainer
           onTrain={onTrainStrategy}
           onPredict={onPredictStrategy}
+          onWalkForward={onWalkForward}
           training={recentTraining}
           prediction={recentPrediction}
           loading={loading}

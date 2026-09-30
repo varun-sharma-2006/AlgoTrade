@@ -20,13 +20,11 @@ async def list_simulations(
     return await store.list_simulations(user["id"])
 
 
-MAX_BACKDATE_DAYS = 365  # portfolio valuation fetches 2 years, leaving a year of warm-up for indicators
+MAX_BACKDATE_DAYS = 365  # portfolio valuation fetches HISTORY_PERIOD (5 years), leaving warm-up for indicators
 
 
-@router.post("/simulations")
-async def create_simulation(
-    payload: SimulationInput, user: dict[str, Any] = Depends(get_current_user), store: Store = Depends(get_db)
-) -> dict[str, Any]:
+def prepare_simulation(payload: SimulationInput) -> SimulationInput:
+    """Validate a new simulation and fill in the strategy's default parameters."""
     params = strategies.DEFAULT_PARAMS.get(payload.strategyId, {}) | payload.parameters
     rules = payload.rules.model_dump() if payload.rules else None
     problem = strategies.validate(payload.strategyId, params, rules)
@@ -37,7 +35,14 @@ async def create_simulation(
         raise HTTPException(status_code=422, detail="The start date can't be in the future")
     if payload.startDate and payload.startDate < today - timedelta(days=MAX_BACKDATE_DAYS):
         raise HTTPException(status_code=422, detail="The start date can be at most one year ago")
-    return await store.add_simulation(user["id"], payload.model_copy(update={"parameters": params}))
+    return payload.model_copy(update={"parameters": params})
+
+
+@router.post("/simulations")
+async def create_simulation(
+    payload: SimulationInput, user: dict[str, Any] = Depends(get_current_user), store: Store = Depends(get_db)
+) -> dict[str, Any]:
+    return await store.add_simulation(user["id"], prepare_simulation(payload))
 
 
 @router.patch("/simulations/{sim_id}")

@@ -7,8 +7,9 @@
 ![FastAPI](https://img.shields.io/badge/FastAPI-0.115-009688?logo=fastapi&logoColor=white)
 
 A full-stack paper-trading and backtesting platform. Pick a stock, choose a strategy, and see how it would
-really have traded over the last two years, fees included, compared with simply buying and holding.
-Live market data comes from Yahoo Finance, and a trading copilot answers questions using real prices.
+really have traded over the last two years, fees and slippage included, compared with simply buying and holding
+and with the S&P 500. Test whether tuned settings survive out of sample with walk-forward testing, try a
+machine-learning strategy that is trained only on the past, and ask the trading copilot to run any of it for you.
 
 **Live demo: [algo-trade-mu.vercel.app](https://algo-trade-mu.vercel.app)** (signs you in automatically as a demo user)
 
@@ -18,14 +19,26 @@ Live market data comes from Yahoo Finance, and a trading copilot answers questio
 
 ## Features
 
-- **Honest backtesting**: three long-only strategies (SMA crossover, Bollinger mean reversion, Donchian breakout)
-  simulated trade by trade on 2 years of daily data. Positions are decided at the close using only past data,
-  every entry and exit pays a fee (10 bps by default), and results are always shown next to buy & hold.
-- **Real metrics**: strategy vs buy & hold return, annualised return, Sharpe ratio, max drawdown of the equity curve,
-  win rate and average return of closed trades, and time in market, plus an equity curve and trade log.
+- **Honest backtesting**: long-only strategies (SMA crossover, Bollinger mean reversion, Donchian breakout and a
+  machine-learning model) simulated trade by trade on the last 2 years of daily data, with earlier history used
+  only to warm up indicators. Positions are decided at the close using only past data, every entry and exit pays a
+  fee (10 bps) plus adjustable slippage (5 bps by default), and results are always shown next to buy & hold.
+- **Risk analytics**: total and annualised return, volatility, Sharpe, Sortino, max drawdown and Calmar for the
+  strategy, buy & hold and the S&P 500 side by side, plus beta, alpha and correlation to the index, win rate,
+  time in market, a growth-of-$1 chart against buy & hold, a drawdown chart and the trade log.
+- **Walk-forward testing**: every quarter, each parameter set is backtested on the previous year and the best one
+  (by Sharpe) trades the next quarter, which it has never seen, rolling forward over 5 years. It shows how much
+  of a backtest's edge was curve fitting: tuned (in-sample) vs out-of-sample returns, fold by fold.
+- **Machine-learning strategy**: logistic regression on 8 price features (returns, moving-average gaps, RSI,
+  volatility, Bollinger z-score) predicts whether tomorrow closes higher. It is refitted every month on a rolling
+  window of past days only, and reports out-of-sample accuracy against an always-up baseline, ROC-AUC, and its
+  feature weights. Written from scratch in Python, with no numpy or scikit-learn.
 - **Today's signal**: re-runs the trained strategy on the latest data and reports buy / hold / sell / wait with the reason.
-- **Trading copilot**: Gemini answers with live numbers from a market screen passed in as context. When the API is
-  rate-limited, a built-in analyst ranks stocks by trend, momentum and RSI, analyses tickers, and explains concepts.
+- **Trading copilot with actions**: Gemini function calling runs the app's own backtester. "Backtest AAPL with
+  SMA 20/60", "Compare strategies on NVDA", "Walk-forward test MSFT with Bollinger" or "Put $5,000 in NVDA with
+  the ML strategy from 6 months ago" run for real, and the answer quotes the results, shown as cards in the chat.
+  When Gemini is rate-limited, the same requests are recognised without it, and a built-in analyst ranks stocks by
+  trend, momentum and RSI, analyses tickers and explains concepts.
 - **Live market data**: watchlist quotes, sparklines, ticker search and candlestick charts.
 - **Paper-trading portfolio**: invest paper money in any stock with any strategy, backdated up to a year. Each
   simulation is replayed on real daily prices with its strategy's buy/sell rules and fees, so the Portfolio page
@@ -40,9 +53,17 @@ Live market data comes from Yahoo Finance, and a trading copilot answers questio
 | --- | --- |
 | ![Portfolio](docs/screenshots/portfolio.png) | ![Strategy builder](docs/screenshots/builder.png) |
 
-| Strategy lab | Trading copilot |
+| Strategy lab: risk vs buy & hold and the S&P 500 | Machine-learning strategy |
 | --- | --- |
-| ![Strategy lab](docs/screenshots/strategy-lab.png) | ![Chatbot](docs/screenshots/chatbot.png) |
+| ![Strategy lab](docs/screenshots/strategy-lab.png) | ![ML strategy](docs/screenshots/ml-strategy.png) |
+
+| Walk-forward test | Copilot running backtests |
+| --- | --- |
+| ![Walk-forward](docs/screenshots/walk-forward.png) | ![Copilot actions](docs/screenshots/copilot-actions.png) |
+
+| Trading copilot | |
+| --- | --- |
+| ![Chatbot](docs/screenshots/chatbot.png) | |
 
 | Live markets | Strategies |
 | --- | --- |
@@ -55,6 +76,10 @@ flowchart LR
     UI["React + TypeScript (Vite)"] -->|REST + bearer token| API["FastAPI"]
     API --> Routes["routes/: auth, market, simulations, analytics, chat"]
     Routes --> Strategies["strategies.py<br/>backtester"]
+    Strategies --> Risk["risk.py<br/>risk metrics"]
+    Strategies --> ML["ml.py<br/>logistic regression"]
+    Routes --> WF["walkforward.py"]
+    Routes --> Copilot["copilot.py<br/>chat tools"]
     Routes --> Advisor["advisor.py<br/>rule-based analyst"]
     Routes --> Gemini["gemini.py<br/>multi-model client"]
     Routes --> Stores["stores.py"]
@@ -74,6 +99,10 @@ backend/
   stores.py         MongoStore and InMemoryStore
   market.py         quotes, charts, search (Yahoo Finance JSON API + offline fallbacks)
   strategies.py     strategy signals and the backtester
+  risk.py           volatility, Sharpe, Sortino, drawdown, Calmar, beta/alpha vs the S&P 500
+  ml.py             machine-learning strategy (logistic regression, time-aware retraining)
+  walkforward.py    walk-forward testing (tune on a year, test on the next quarter)
+  copilot.py        copilot tools for Gemini function calling, and the offline request parser
   rules.py          Strategy Builder rule engine (SMA, EMA, RSI, crossovers, stop-loss, take-profit)
   portfolio.py      replays simulations on real prices and totals the portfolio
   advisor.py        chatbot analyst used when Gemini is unavailable
@@ -163,8 +192,10 @@ override variables already set in your system environment.
 | `GOOGLE_API_KEY` | Gemini API key for the chatbot (optional) | unset |
 | `GEMINI_MODELS` | Gemini models tried in order | `gemini-3.5-flash,gemini-3.1-flash-lite,gemini-3.5-flash-lite,gemini-flash-latest` |
 | `GEMINI_BUDGET_SECONDS` | How long to retry Gemini before the built-in analyst answers | `12` |
-| `BACKTEST_PERIOD` | History used for backtests (Yahoo Finance range, e.g. `1y`, `2y`, `5y`) | `2y` |
+| `BACKTEST_PERIOD` | Window backtests report on (e.g. `1y`, `2y`) | `2y` |
+| `HISTORY_PERIOD` | Price history fetched (Yahoo Finance range): the backtest window plus warm-up, ML training data and walk-forward folds | `5y` |
 | `TRADING_FEE_BPS` | Fee charged on every entry and exit, in basis points | `10` |
+| `SLIPPAGE_BPS` | Default slippage per entry and exit, in basis points (the Strategy lab can override it) | `5` |
 | `STATIC_DIR` | Serve a built frontend (`dist/`) from the API, for single-container deploys | unset |
 | `FRONTEND_ORIGIN` | Allowed CORS origin | `http://localhost:5173` |
 | `SESSION_DURATION_DAYS` | Session lifetime | `7` |
@@ -196,13 +227,14 @@ Interactive docs are served at `/docs`. Authenticated routes expect `Authorizati
 | `GET` `POST` | `/simulations` | List or create simulations |
 | `PATCH` `DELETE` | `/simulations/{id}` | Update or delete a simulation |
 | `GET` | `/analytics/strategies` | Strategy catalogue |
-| `POST` | `/analytics/train` | Backtest a strategy: `{symbol, strategyId, ...parameters}` |
+| `POST` | `/analytics/train` | Backtest a strategy: `{symbol, strategyId, ...parameters, slippageBps?}` |
+| `POST` | `/analytics/walk-forward` | Walk-forward test: `{symbol, strategyId, slippageBps?}` |
 | `POST` | `/analytics/predict` | Today's signal from the last trained strategy |
 | `GET` | `/analytics/overview`, `/analytics/sparkline` | Dashboard data |
 | `GET` | `/portfolio` | Every simulation valued today, totals, daily history and allocation |
 | `GET` `POST` | `/strategies/custom` | List or save Strategy Builder strategies |
 | `DELETE` | `/strategies/custom/{id}` | Delete a saved strategy |
-| `POST` | `/chat` | Trading copilot |
+| `POST` | `/chat` | Trading copilot; returns `actions` for any backtests or simulations it ran |
 
 Example backtest request:
 
@@ -211,7 +243,8 @@ Example backtest request:
 ```
 
 Strategy parameters: `sma-crossover` uses `shortWindow` and `longWindow`, `mean-reversion` uses `lookback` and
-`deviation`, `trend-follow` uses `channel`, and `buy-hold` has none. A `custom` strategy sends `rules` instead:
+`deviation`, `trend-follow` uses `channel`, `ml-logistic` uses `threshold` (probability of a rise needed to buy)
+and `trainWindow` (days of history each model is fitted on), and `buy-hold` has none. A `custom` strategy sends `rules` instead:
 
 ```json
 {
@@ -232,9 +265,10 @@ rule holds or the stop-loss / take-profit is hit.
 ## Testing
 
 ```bash
-pytest backend              # backend: strategies, analyst, and every API route against both stores
+pytest backend              # backend: backtester, risk metrics, ML (including no-look-ahead checks), walk-forward,
+                            # copilot tools, analyst, and every API route against both stores
 ruff check backend api && ruff format --check backend api
-npm test                    # frontend: API client and strategy lab (Vitest + Testing Library)
+npm test                    # frontend: API client, strategy lab, research panels, copilot cards (Vitest)
 npm run check               # TypeScript
 ```
 

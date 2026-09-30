@@ -86,4 +86,4 @@ def test_train_rejects_bad_parameters(client):
 def test_health_and_strategies(client):
     assert client.get("/health").json()["status"] == "ok"
     ids = {s["id"] for s in client.get("/analytics/strategies").json()}
-    assert ids == {"sma-crossover", "mean-reversion", "trend-follow", "buy-hold"}
+    assert ids == {"sma-crossover", "mean-reversion", "trend-follow", "ml-logistic", "buy-hold"}

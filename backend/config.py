@@ -46,8 +46,13 @@ class Settings(BaseModel):
     mongo_db_name: str = Field(default_factory=lambda: os.getenv("MONGODB_DB", "algo-trade-simulator"))
     gemini_models: list[str] = Field(default_factory=lambda: _csv(os.getenv("GEMINI_MODELS", DEFAULT_GEMINI_MODELS)))
     gemini_budget_seconds: float = Field(default_factory=lambda: float(os.getenv("GEMINI_BUDGET_SECONDS", "12")))
+    # Backtests report on the last BACKTEST_PERIOD; the extra HISTORY_PERIOD before it warms up indicators and
+    # gives the machine-learning strategy past data to train on.
     backtest_period: str = Field(default_factory=lambda: os.getenv("BACKTEST_PERIOD", "2y"))
+    history_period: str = Field(default_factory=lambda: os.getenv("HISTORY_PERIOD", "5y"))
     trading_fee_bps: float = Field(default_factory=lambda: float(os.getenv("TRADING_FEE_BPS", "10")))
+    # Default slippage: how much worse than the close each fill is assumed to be.
+    slippage_bps: float = Field(default_factory=lambda: float(os.getenv("SLIPPAGE_BPS", "5")))
     # Built frontend (npm run build -> dist/) to serve from the API, for single-container deploys.
     static_dir: str = Field(default_factory=lambda: os.getenv("STATIC_DIR", ""))
     yahoo_user_agent: str = Field(
