@@ -245,6 +245,10 @@ CI runs all of these on every push and pull request.
 This project is for education and research. Backtests describe the past and are not a guarantee of future results,
 and nothing here is financial advice.
 
+## Team
+
+Built by [Varun Sharma](https://github.com/varun-sharma-2006) and [Yashika Garg](https://github.com/yashikagarg16).
+
 ## License
 
 [MIT](LICENSE)
