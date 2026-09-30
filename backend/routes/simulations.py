@@ -31,7 +31,8 @@ def prepare_simulation(payload: SimulationInput) -> SimulationInput:
     if problem:
         raise HTTPException(status_code=422, detail=problem)
     today = now().date()
-    if payload.startDate and payload.startDate > today:
+    # Dates are compared in UTC. Visitors ahead of UTC (India after midnight) can already be on tomorrow's date.
+    if payload.startDate and payload.startDate > today + timedelta(days=1):
         raise HTTPException(status_code=422, detail="The start date can't be in the future")
     if payload.startDate and payload.startDate < today - timedelta(days=MAX_BACKDATE_DAYS):
         raise HTTPException(status_code=422, detail="The start date can be at most one year ago")

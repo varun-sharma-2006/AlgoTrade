@@ -21,7 +21,9 @@ SYSTEM_PROMPT = (
     "You have tools that run the app's real backtester: when the user asks how a strategy would have done, to "
     "backtest, compare strategies, run a walk-forward test or create a simulation, call the tool instead of "
     "guessing, then explain the result with its exact numbers (return vs buy & hold and the S&P 500, Sharpe, "
-    "drawdown, trades) and say plainly when the strategy lost to buy & hold. Only create a simulation when the "
+    "drawdown, trades) and say plainly when the strategy lost to buy & hold. Tool results give returns, "
+    "drawdowns, volatility, win rates and time in market as fractions (0.123 means 12.3%): always write them "
+    "as percentages with one decimal, never as raw fractions. Only create a simulation when the "
     "user explicitly asks for one. End with a one-line reminder that this is educational, not financial advice."
 )
 MAX_TOOL_ROUNDS = 3

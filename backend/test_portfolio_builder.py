@@ -7,6 +7,7 @@ import pytest
 from backend import portfolio, rules
 from backend.routes import portfolio as portfolio_routes
 from backend.schemas import StrategyRules
+from backend.stores import now
 
 
 def closes_up_down():
@@ -176,11 +177,15 @@ def test_portfolio_values_backdated_simulations(client, monkeypatch):
 def test_simulation_validation(client):
     headers = auth(client)
     base = {"symbol": "AAPL", "strategy": "X", "startingCapital": 100}
-    tomorrow = (date.today() + timedelta(days=1)).isoformat()
-    too_old = (date.today() - timedelta(days=400)).isoformat()
-    assert client.post("/simulations", headers=headers, json=base | {"startDate": tomorrow}).status_code == 422
+    utc_today = now().date()  # the server's clock
+    future = (utc_today + timedelta(days=3)).isoformat()
+    too_old = (utc_today - timedelta(days=400)).isoformat()
+    assert client.post("/simulations", headers=headers, json=base | {"startDate": future}).status_code == 422
+    # A visitor ahead of UTC may already be on tomorrow's date; that still counts as today.
+    ahead = client.post("/simulations", headers=headers, json=base | {"startDate": str(utc_today + timedelta(days=1))})
+    assert ahead.status_code == 200
     assert client.post("/simulations", headers=headers, json=base | {"startDate": too_old}).status_code == 422
     assert client.post("/simulations", headers=headers, json=base | {"strategyId": "astrology"}).status_code == 422
     assert client.post("/simulations", headers=headers, json=base | {"strategyId": "custom"}).status_code == 422
     ok = client.post("/simulations", headers=headers, json=base | {"strategyId": "sma-crossover"}).json()
-    assert ok["parameters"] == {"shortWindow": 20, "longWindow": 60} and ok["startDate"] == date.today().isoformat()
+    assert ok["parameters"] == {"shortWindow": 20, "longWindow": 60} and ok["startDate"] == utc_today.isoformat()
