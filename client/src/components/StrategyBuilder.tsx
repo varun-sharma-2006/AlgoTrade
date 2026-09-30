@@ -354,7 +354,7 @@ export function StrategyBuilder({ saved, onBacktest, onSave, onDelete }: Strateg
           <div className="panel">
             <header>
               <h2>Backtest</h2>
-              <span className="hint">2 years of daily data, fees included</span>
+              <span className="hint">2 years of daily data, fees and slippage included</span>
             </header>
             {result ? (
               <BacktestResults training={result} description={describeRules(result.rules ?? rules)} />

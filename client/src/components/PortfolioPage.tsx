@@ -162,7 +162,10 @@ function PositionRow({ position }: { position: PortfolioPosition }) {
       </td>
       <td>
         <div>{position.strategy}</div>
-        <span className="subtle">{strategyLabel(position.strategyId)}</span>
+        {/* The strategy type, when the simulation's own name doesn't already say it (e.g. saved custom rules). */}
+        {strategyLabel(position.strategyId).replace(" (baseline)", "") !== position.strategy ? (
+          <span className="subtle">{strategyLabel(position.strategyId)}</span>
+        ) : null}
       </td>
       <td>
         {position.error ? (

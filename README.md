@@ -11,7 +11,8 @@ really have traded over the last two years, fees and slippage included, compared
 and with the S&P 500. Test whether tuned settings survive out of sample with walk-forward testing, try a
 machine-learning strategy that is trained only on the past, and ask the trading copilot to run any of it for you.
 
-**Live demo: [algo-trade-mu.vercel.app](https://algo-trade-mu.vercel.app)** (signs you in automatically as a demo user)
+**Live demo: [algo-trade-mu.vercel.app](https://algo-trade-mu.vercel.app)** (sign in with Google) ·
+**[Watch the 2-minute demo video](docs/demo.mp4)**
 
 ![Sign in](docs/screenshots/login.png)
 
