@@ -3,17 +3,25 @@
 A structured way to present the project. For the full technical detail, see
 [PROJECT_EXPLANATION.md](PROJECT_EXPLANATION.md).
 
-> **Team project.** Algo Trade Simulator was built by Varun Sharma and Yashika Garg. In interviews, say "we"
-> for the project and be specific about **your own** part. Fill in the section below before you use this guide.
+> **Team project.** Algo Trade Simulator was built jointly by Varun Sharma and Yashika Garg. We worked side by
+> side on every part (design, backend, frontend, testing and deployment) and made each decision together.
 
-## 0. Your part (fill this in)
+## 0. How we worked together
 
-- What I personally built: `...`
-- A decision I made and why: `...`
-- A bug I fixed myself: `...`
+We didn't split the project into "my part" and "your part". We sat together for every stage, pair-programming:
+one person typing while the other reviewed and suggested, switching often. Every design choice was agreed
+between us, from the honest backtester and the risk metrics to walk-forward testing, the ML strategy, the
+copilot and the deployment. So each of us can explain, and has worked on, any part of the codebase.
 
-Interviewers almost always ask "what did *you* do?" on team projects. A clear, honest answer here matters more
-than anything else in this guide.
+Interviewers almost always ask "what did *you* do?" on team projects. A clear, honest answer:
+
+> "We built it together as a pair: we sat side by side for the whole project and designed every part jointly.
+> One of us would write the code while the other reviewed it, and we swapped roles regularly. That's why I can
+> walk you through any part in depth. For example, how the backtester avoids look-ahead bias, or why the
+> walk-forward test showed our tuned strategy dropping from 24% to 10% a year."
+
+Then prove it by going deep on whichever part they pick. Being able to explain everything is what makes a
+"we built it together" answer convincing.
 
 ---
 
