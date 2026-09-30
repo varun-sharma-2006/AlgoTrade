@@ -18,7 +18,7 @@ Interviewers almost always ask "what did *you* do?" on team projects. A clear, h
 > "We built it together as a pair: we sat side by side for the whole project and designed every part jointly.
 > One of us would write the code while the other reviewed it, and we swapped roles regularly. That's why I can
 > walk you through any part in depth. For example, how the backtester avoids look-ahead bias, or why the
-> walk-forward test showed our tuned strategy dropping from 24% to 10% a year."
+> walk-forward test showed our tuned strategy dropping from 24% to 11% a year."
 
 Then prove it by going deep on whichever part they pick. Being able to explain everything is what makes a
 "we built it together" answer convincing.
@@ -44,7 +44,7 @@ Open https://algo-trade-mu.vercel.app and sign in with Google. Suggested order:
 1. **Strategy lab:** backtest the SMA crossover on AAPL. Point at the growth-of-$1 and drawdown charts, then the
    risk table: strategy vs buy & hold vs the S&P 500 on Sharpe, Sortino and drawdown.
 2. **Walk-forward test:** press *Walk-forward test*. Show the tuned vs out-of-sample returns and the fold table.
-   "Tuned on the past it looked like 24% a year; on data it had never seen it made about 10%."
+   "Tuned on the past it looked like 24% a year; on data it had never seen it made about 11%."
 3. **Machine learning:** switch to the ML strategy on NVDA. Show accuracy vs the always-up baseline, the AUC and
    the feature weights, and be upfront that it has no real edge.
 4. **Trading copilot:** ask "Compare strategies on NVDA" and show the card with the real numbers, then "Which stock

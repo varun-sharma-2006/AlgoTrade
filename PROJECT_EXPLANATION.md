@@ -136,7 +136,8 @@ The **portfolio** uses the same simulation loop from each simulation's start dat
   next 63 days. The position carries over between folds, like a trader who re-tunes every quarter.
 - Output: tuned (in-sample) annualised return vs out-of-sample annualised return, out-of-sample Sharpe and
   drawdown vs buy & hold, quarters that beat buy & hold, and how often the most common settings were chosen.
-- Example (AAPL, SMA crossover): +23.9% a year when tuned, +10.4% a year out of sample, vs +18.8% for buy & hold.
+- Example (AAPL, SMA crossover, as of 30 Sept 2026): +23.9% a year when tuned, +11.1% a year out of sample, vs
+  +19.6% for buy & hold. The exact figures move a little as each new trading day enters the window.
   That gap is curve fitting made visible.
 
 ---
