@@ -33,8 +33,23 @@ STRATEGIES: list[dict[str, Any]] = [
         "recommendedFor": ["breakout", "trend"],
         "parameters": [{"name": "channel", "value": "20"}],
     },
+    {
+        "id": "buy-hold",
+        "name": "Buy & hold",
+        "description": "Buy on day one and never sell. The baseline every other strategy has to beat.",
+        "recommendedFor": ["baseline", "long-term"],
+        "parameters": [],
+    },
 ]
-STRATEGY_IDS = {s["id"] for s in STRATEGIES}
+# "custom" strategies come from the Strategy Builder and carry their own rules (see backend/rules.py).
+STRATEGY_IDS = {s["id"] for s in STRATEGIES} | {"custom"}
+DEFAULT_PARAMS: dict[str, dict[str, float]] = {
+    "sma-crossover": {"shortWindow": 20, "longWindow": 60},
+    "mean-reversion": {"lookback": 20, "deviation": 2.0},
+    "trend-follow": {"channel": 20},
+    "buy-hold": {},
+    "custom": {},
+}
 
 Series = list[float | None]
 
@@ -73,26 +88,48 @@ def compute_drawdown(values: list[float]) -> float:
     return abs(worst)
 
 
-def validate(strategy_id: str, params: dict[str, float]) -> str | None:
+def validate(strategy_id: str, params: dict[str, float], rules: dict[str, Any] | None = None) -> str | None:
     if strategy_id not in STRATEGY_IDS:
         return f"Unknown strategy '{strategy_id}'. Choose one of: {', '.join(sorted(STRATEGY_IDS))}"
+    missing = set(DEFAULT_PARAMS[strategy_id]) - set(params)
+    if missing:
+        return f"Missing strategy parameters: {', '.join(sorted(missing))}"
     if strategy_id == "sma-crossover" and params["shortWindow"] >= params["longWindow"]:
         return "shortWindow must be less than longWindow"
+    if strategy_id == "custom" and not (rules and rules.get("entry")):
+        return "A custom strategy needs at least one entry rule"
     return None
 
 
 WARMUP_PARAM = {"sma-crossover": "longWindow", "mean-reversion": "lookback", "trend-follow": "channel"}
 
 
-def warmup(strategy_id: str, params: dict[str, float]) -> int:
+def warmup(strategy_id: str, params: dict[str, float], rules: dict[str, Any] | None = None) -> int:
     """Days of history a strategy needs before it can produce a signal."""
+    if strategy_id == "custom":
+        from backend import rules as rule_engine
+
+        return rule_engine.warmup(rules or {"entry": []})
+    if strategy_id == "buy-hold":
+        return 1
     return int(params[WARMUP_PARAM[strategy_id]])
 
 
-def signals(strategy_id: str, closes: list[float], params: dict[str, float]) -> tuple[list[int], dict[str, Series]]:
+def signals(
+    strategy_id: str, closes: list[float], params: dict[str, float], rules: dict[str, Any] | None = None
+) -> tuple[list[int], dict[str, Series]]:
     """Target position for each day, plus indicator lines for charting."""
     n = len(closes)
     target = [0] * n
+    if strategy_id == "buy-hold":
+        # Flat on the first day so the entry (and its fee) is recorded like any other trade.
+        return [0] + [1] * (n - 1), {}
+
+    if strategy_id == "custom":
+        from backend import rules as rule_engine
+
+        return rule_engine.signals(closes, rules or {"entry": []})
+
     if strategy_id == "sma-crossover":
         short = moving_average(closes, int(params["shortWindow"]))
         long_ = moving_average(closes, int(params["longWindow"]))
@@ -146,9 +183,10 @@ def backtest(
     strategy_id: str,
     params: dict[str, float],
     fee_bps: float = 10.0,
+    rules: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     fee = fee_bps / 10_000
-    target, indicators = signals(strategy_id, closes, params)
+    target, indicators = signals(strategy_id, closes, params, rules)
     equity = [1.0]
     daily_returns: list[float] = []
     trades: list[dict[str, Any]] = []
@@ -228,13 +266,23 @@ def _trade(
     }
 
 
-def current_signal(strategy_id: str, closes: list[float], params: dict[str, float]) -> dict[str, Any]:
+def current_signal(
+    strategy_id: str, closes: list[float], params: dict[str, float], rules: dict[str, Any] | None = None
+) -> dict[str, Any]:
     """Today's action for a trained strategy: buy / hold / sell / wait."""
-    target, indicators = signals(strategy_id, closes, params)
+    target, indicators = signals(strategy_id, closes, params, rules)
     today, yesterday = target[-1], target[-2] if len(target) > 1 else 0
     signal = {(1, 0): "buy", (1, 1): "hold", (0, 1): "sell", (0, 0): "wait"}[(today, yesterday)]
     price = closes[-1]
-    if strategy_id == "sma-crossover":
+    if strategy_id == "buy-hold":
+        strength = 1.0
+        detail = f"Buy & hold stays invested; the last close was {price:.2f}."
+    elif strategy_id == "custom":
+        from backend import rules as rule_engine
+
+        strength = 1.0 if today else 0.5
+        detail = f"Rules: {rule_engine.describe(rules or {'entry': []})}"
+    elif strategy_id == "sma-crossover":
         short, long_ = indicators["shortSma"][-1], indicators["longSma"][-1]
         spread = (short - long_) / long_ if long_ else 0.0
         strength = abs(spread) * 20

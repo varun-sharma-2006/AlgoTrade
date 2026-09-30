@@ -14,15 +14,9 @@ from backend.stores import Store, now, serialize_mongo_doc
 
 router = APIRouter(tags=["analytics"])
 
-PARAMS_BY_STRATEGY = {
-    "sma-crossover": ("shortWindow", "longWindow"),
-    "mean-reversion": ("lookback", "deviation"),
-    "trend-follow": ("channel",),
-}
-
 
 def strategy_params(payload: TrainingPayload) -> dict[str, float]:
-    names = PARAMS_BY_STRATEGY.get(payload.strategyId, ())
+    names = strategies.DEFAULT_PARAMS.get(payload.strategyId, {})
     return {name: getattr(payload, name) for name in names}
 
 
@@ -74,19 +68,21 @@ async def train_strategy(
     payload: TrainingPayload, user: dict[str, Any] = Depends(get_current_user), store: Store = Depends(get_db)
 ) -> dict[str, Any]:
     params = strategy_params(payload)
-    problem = strategies.validate(payload.strategyId, params)
+    rules = payload.rules.model_dump() if payload.rules else None
+    problem = strategies.validate(payload.strategyId, params, rules)
     if problem:
         raise HTTPException(status_code=422, detail=problem)
     chart = fetch_chart(payload.symbol, range_value=settings.backtest_period, interval="1d")
     closes = [point["close"] for point in chart["points"]]
-    if len(closes) < strategies.warmup(payload.strategyId, params) + 30:
+    if len(closes) < strategies.warmup(payload.strategyId, params, rules) + 30:
         raise HTTPException(status_code=422, detail="Not enough price history for these parameters")
     timestamps = [point["timestamp"] for point in chart["points"]]
-    report = strategies.backtest(closes, timestamps, payload.strategyId, params, settings.trading_fee_bps)
+    report = strategies.backtest(closes, timestamps, payload.strategyId, params, settings.trading_fee_bps, rules)
     result = {
         "symbol": payload.symbol.upper(),
         "strategyId": payload.strategyId,
         "parameters": params,
+        "rules": rules,
         # Kept for clients that read the SMA windows directly.
         "shortWindow": payload.shortWindow,
         "longWindow": payload.longWindow,
@@ -101,7 +97,8 @@ async def train_strategy(
 async def predict(
     payload: PredictionPayload, user: dict[str, Any] = Depends(get_current_user), store: Store = Depends(get_db)
 ) -> dict[str, Any]:
-    if payload.strategyId and payload.parameters:
+    rules = payload.rules.model_dump() if payload.rules else None
+    if payload.strategyId is not None and payload.parameters is not None:
         # The client says which strategy it trained, so this works on any server instance.
         strategy_id, params = payload.strategyId, payload.parameters
     else:
@@ -110,22 +107,18 @@ async def predict(
             raise HTTPException(status_code=404, detail="Train the strategy first")
         trained = training.get("payload") or {}
         strategy_id = trained.get("strategyId") or training.get("strategyId") or "sma-crossover"
-        params = trained.get("parameters") or {
-            "shortWindow": trained.get("shortWindow", 20),
-            "longWindow": trained.get("longWindow", 60),
-        }
-    problem = (
-        strategies.validate(strategy_id, params)
-        if set(params) >= set(PARAMS_BY_STRATEGY.get(strategy_id, ()))
-        else "Missing strategy parameters"
-    )
+        params = trained.get("parameters")
+        if params is None:
+            params = {"shortWindow": trained.get("shortWindow", 20), "longWindow": trained.get("longWindow", 60)}
+        rules = rules or trained.get("rules")
+    problem = strategies.validate(strategy_id, params, rules)
     if problem:
         raise HTTPException(status_code=422, detail=problem)
     chart = fetch_chart(payload.symbol, range_value="1y", interval="1d")
     closes = [point["close"] for point in chart["points"]]
-    if len(closes) < strategies.warmup(strategy_id, params) + 2:
+    if len(closes) < strategies.warmup(strategy_id, params, rules) + 2:
         raise HTTPException(status_code=422, detail="Not enough data for prediction")
-    outlook = strategies.current_signal(strategy_id, closes, params)
+    outlook = strategies.current_signal(strategy_id, closes, params, rules)
     return {
         "symbol": payload.symbol.upper(),
         "strategyId": strategy_id,

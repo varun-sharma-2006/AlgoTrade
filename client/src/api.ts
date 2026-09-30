@@ -17,6 +17,9 @@ import type {
   ChartResponse,
   AuthConfig,
   VisitorsResponse,
+  CustomStrategy,
+  PortfolioResponse,
+  StrategyRules,
 } from "./types";
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
@@ -126,6 +129,25 @@ export function fetchVisitors(token: string) {
   return request<VisitorsResponse>("/admin/visitors", { token });
 }
 
+export function fetchPortfolio(token: string) {
+  return request<PortfolioResponse>("/portfolio", { token });
+}
+
+export function fetchCustomStrategies(token: string) {
+  return request<CustomStrategy[]>("/strategies/custom", { token });
+}
+
+export function saveCustomStrategy(
+  token: string,
+  payload: { name: string; description?: string; rules: StrategyRules },
+) {
+  return request<CustomStrategy>("/strategies/custom", { method: "POST", body: payload, token });
+}
+
+export function deleteCustomStrategy(token: string, id: string) {
+  return request<void>(`/strategies/custom/${encodeURIComponent(id)}`, { method: "DELETE", token });
+}
+
 export function devAuthBypass(payload?: DevAuthBypassPayload) {
   return request<AuthResponse>("/dev/auth/bypass", { method: "POST", body: payload });
 }
@@ -177,7 +199,7 @@ export function trainStrategy(token: string, payload: TrainingPayload) {
 export function predictStrategy(
   token: string,
   symbol: string,
-  strategy?: { strategyId: string; parameters: Record<string, number> },
+  strategy?: { strategyId: string; parameters: Record<string, number>; rules?: StrategyRules | null },
 ) {
   // Sending the strategy lets any server instance answer, even one that didn't run the backtest.
   return request<PredictionResult>("/analytics/predict", {

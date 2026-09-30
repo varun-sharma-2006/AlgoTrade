@@ -21,7 +21,7 @@ from motor.motor_asyncio import AsyncIOMotorClient, AsyncIOMotorCollection
 from passlib.context import CryptContext
 
 from backend.config import logger, settings
-from backend.schemas import SimulationInput, SimulationUpdate
+from backend.schemas import CustomStrategyInput, SimulationInput, SimulationUpdate
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
@@ -105,6 +105,19 @@ def session_allowed(provider: str | None) -> bool:
     """Once Sign in with Google is on, only Google sessions count: sessions from the old shared demo
     login or password accounts (including ones created before providers were recorded) are rejected."""
     return not settings.google_client_id or provider == "google"
+
+
+MAX_CUSTOM_STRATEGIES = 20
+
+
+def _simulation_trading_fields(payload: SimulationInput) -> dict[str, Any]:
+    """How a simulation trades (read by the portfolio valuer)."""
+    return {
+        "strategyId": payload.strategyId,
+        "parameters": dict(payload.parameters),
+        "rules": payload.rules.model_dump() if payload.rules else None,
+        "startDate": (payload.startDate or now().date()).isoformat(),
+    }
 
 
 def _object_id(value: str) -> ObjectId:
@@ -200,7 +213,7 @@ class MongoStore:
             "status": "active",
             "notes": payload.notes,
             "createdAt": now(),
-        }
+        } | _simulation_trading_fields(payload)
         result = await self.simulations.insert_one(doc)
         return serialize_mongo_doc(doc | {"_id": result.inserted_id})
 
@@ -233,6 +246,25 @@ class MongoStore:
     async def list_trained(self, user_id: str) -> list[dict[str, Any]]:
         cursor = self.trained.find({"userId": ObjectId(user_id)})
         return serialize_mongo_doc(await cursor.to_list(length=100))
+
+    # Strategy Builder
+    async def list_custom_strategies(self, user_id: str) -> list[dict[str, Any]]:
+        cursor = self.db.custom_strategies.find({"userId": ObjectId(user_id)}).sort("createdAt", -1)
+        return serialize_mongo_doc(await cursor.to_list(length=MAX_CUSTOM_STRATEGIES))
+
+    async def add_custom_strategy(self, user_id: str, payload: CustomStrategyInput) -> dict[str, Any]:
+        if await self.db.custom_strategies.count_documents({"userId": ObjectId(user_id)}) >= MAX_CUSTOM_STRATEGIES:
+            raise ValueError(f"You can save up to {MAX_CUSTOM_STRATEGIES} strategies; delete one first")
+        doc = {"userId": ObjectId(user_id), **payload.model_dump(), "createdAt": now()}
+        result = await self.db.custom_strategies.insert_one(doc)
+        return serialize_mongo_doc(doc | {"_id": result.inserted_id})
+
+    async def delete_custom_strategy(self, user_id: str, strategy_id: str) -> None:
+        result = await self.db.custom_strategies.delete_one(
+            {"_id": _object_id(strategy_id), "userId": ObjectId(user_id)}
+        )
+        if result.deleted_count == 0:
+            raise KeyError("Strategy not found")
 
     # Sign-in tracking
     async def record_login(
@@ -278,6 +310,7 @@ class InMemoryStore:
         self.users_by_id: dict[str, dict[str, Any]] = {}
         self.simulations: dict[str, dict[str, Any]] = {}
         self.trained: dict[str, dict[str, Any]] = {}
+        self.custom_strategies: dict[str, dict[str, Any]] = {}
         self.logins: list[dict[str, Any]] = []
 
     async def close(self) -> None:
@@ -352,7 +385,7 @@ class InMemoryStore:
                 "status": "active",
                 "notes": payload.notes,
                 "createdAt": now().isoformat(),
-            }
+            } | _simulation_trading_fields(payload)
             self.simulations[record["id"]] = record
             return dict(record)
 
@@ -388,6 +421,26 @@ class InMemoryStore:
     async def list_trained(self, user_id: str) -> list[dict[str, Any]]:
         async with self.lock:
             return [item for item in self.trained.values() if item["userId"] == user_id]
+
+    async def list_custom_strategies(self, user_id: str) -> list[dict[str, Any]]:
+        async with self.lock:
+            mine = [dict(s) for s in self.custom_strategies.values() if s["userId"] == user_id]
+        return sorted(mine, key=lambda s: s["createdAt"], reverse=True)
+
+    async def add_custom_strategy(self, user_id: str, payload: CustomStrategyInput) -> dict[str, Any]:
+        async with self.lock:
+            if sum(1 for s in self.custom_strategies.values() if s["userId"] == user_id) >= MAX_CUSTOM_STRATEGIES:
+                raise ValueError(f"You can save up to {MAX_CUSTOM_STRATEGIES} strategies; delete one first")
+            record = {"id": uuid.uuid4().hex, "userId": user_id, **payload.model_dump(), "createdAt": now().isoformat()}
+            self.custom_strategies[record["id"]] = record
+            return dict(record)
+
+    async def delete_custom_strategy(self, user_id: str, strategy_id: str) -> None:
+        async with self.lock:
+            record = self.custom_strategies.get(strategy_id)
+            if not record or record["userId"] != user_id:
+                raise KeyError("Strategy not found")
+            self.custom_strategies.pop(strategy_id, None)
 
     async def record_login(
         self, user: dict[str, Any], picture: str | None, provider: str, user_agent: str | None

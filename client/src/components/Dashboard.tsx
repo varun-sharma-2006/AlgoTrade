@@ -1,4 +1,5 @@
 import type {
+  CustomStrategy,
   MarketQuote,
   Simulation,
   SimulationInput,
@@ -28,6 +29,7 @@ interface DashboardProps {
   onLogout: () => void;
   loading: boolean;
   error?: string | null;
+  customStrategies?: CustomStrategy[];
 }
 
 export function Dashboard({
@@ -45,6 +47,7 @@ export function Dashboard({
   onLogout,
   loading,
   error,
+  customStrategies,
 }: DashboardProps) {
   return (
     <main>
@@ -60,7 +63,7 @@ export function Dashboard({
 
       <div className="section-grid">
         <Watchlist quotes={watchlist} onRefresh={onRefreshWatchlist} loading={loading} />
-        <SimulationForm onSubmit={onCreateSimulation} loading={loading} />
+        <SimulationForm onSubmit={onCreateSimulation} loading={loading} customStrategies={customStrategies} />
         <StrategyTrainer
           onTrain={onTrainStrategy}
           onPredict={onPredictStrategy}

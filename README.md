@@ -27,9 +27,18 @@ Live market data comes from Yahoo Finance, and a trading copilot answers questio
 - **Trading copilot**: Gemini answers with live numbers from a market screen passed in as context. When the API is
   rate-limited, a built-in analyst ranks stocks by trend, momentum and RSI, analyses tickers, and explains concepts.
 - **Live market data**: watchlist quotes, sparklines, ticker search and candlestick charts.
-- **Paper-trading simulations**: create, update and track simulations per user.
+- **Paper-trading portfolio**: invest paper money in any stock with any strategy, backdated up to a year. Each
+  simulation is replayed on real daily prices with its strategy's buy/sell rules and fees, so the Portfolio page
+  shows live value, profit and loss, today's change, allocation, and how each one did against buy & hold.
+- **Strategy Builder**: design your own strategy from rules such as "RSI(14) is below 30" or
+  "SMA(50) crosses above SMA(200)", add a stop-loss or take-profit, read it back in plain English, backtest it,
+  save it, and use it in simulations.
 - **Sign in with Google**: Google verifies each visitor's email; an admin-only **Visitors** page lists who signed in, when and from which device, with CSV export.
 - **Runs anywhere**: an in-memory mode needs no database; MongoDB is used for persistence.
+
+| Portfolio | Strategy builder |
+| --- | --- |
+| ![Portfolio](docs/screenshots/portfolio.png) | ![Strategy builder](docs/screenshots/builder.png) |
 
 | Strategy lab | Trading copilot |
 | --- | --- |
@@ -65,6 +74,8 @@ backend/
   stores.py         MongoStore and InMemoryStore
   market.py         quotes, charts, search (Yahoo Finance JSON API + offline fallbacks)
   strategies.py     strategy signals and the backtester
+  rules.py          Strategy Builder rule engine (SMA, EMA, RSI, crossovers, stop-loss, take-profit)
+  portfolio.py      replays simulations on real prices and totals the portfolio
   advisor.py        chatbot analyst used when Gemini is unavailable
   gemini.py         Gemini client with retries and model fallback
   routes/           one router per area
@@ -188,6 +199,9 @@ Interactive docs are served at `/docs`. Authenticated routes expect `Authorizati
 | `POST` | `/analytics/train` | Backtest a strategy: `{symbol, strategyId, ...parameters}` |
 | `POST` | `/analytics/predict` | Today's signal from the last trained strategy |
 | `GET` | `/analytics/overview`, `/analytics/sparkline` | Dashboard data |
+| `GET` | `/portfolio` | Every simulation valued today, totals, daily history and allocation |
+| `GET` `POST` | `/strategies/custom` | List or save Strategy Builder strategies |
+| `DELETE` | `/strategies/custom/{id}` | Delete a saved strategy |
 | `POST` | `/chat` | Trading copilot |
 
 Example backtest request:
@@ -197,7 +211,23 @@ Example backtest request:
 ```
 
 Strategy parameters: `sma-crossover` uses `shortWindow` and `longWindow`, `mean-reversion` uses `lookback` and
-`deviation`, and `trend-follow` uses `channel`.
+`deviation`, `trend-follow` uses `channel`, and `buy-hold` has none. A `custom` strategy sends `rules` instead:
+
+```json
+{
+  "symbol": "AAPL",
+  "strategyId": "custom",
+  "rules": {
+    "entry": [{ "left": { "kind": "rsi", "period": 14 }, "op": "<", "right": { "kind": "value", "value": 30 } }],
+    "exit": [{ "left": { "kind": "rsi", "period": 14 }, "op": ">", "right": { "kind": "value", "value": 60 } }],
+    "stopLoss": 0.08
+  }
+}
+```
+
+Operands are `price`, `sma`, `ema`, `rsi` (with a `period`) or a fixed `value`; comparisons are `>`, `<`,
+`crosses_above` and `crosses_below`. The strategy buys when **all** entry rules hold and sells when **any** exit
+rule holds or the stop-loss / take-profit is hit.
 
 ## Testing
 

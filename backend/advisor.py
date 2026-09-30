@@ -588,12 +588,13 @@ CONCEPTS: list[tuple[tuple[str, ...], str]] = [
         "should learn on paper first. This simulator focuses on stocks.",
     ),
     (
-        ("simulation", "this app", "how do i use", "how to use", "train", "predict"),
-        "Using the simulator: 1) Simulations: launch a paper-trading simulation with a symbol, strategy and starting "
-        "capital. 2) Strategy lab (same page): pick SMA crossover, mean reversion or breakout, run a backtest to see "
-        "return vs buy & hold, win rate, Sharpe, drawdown and every trade, then press Today's signal. "
-        "3) Live data: search any ticker for candle charts. "
-        "4) Ask me about any stock (e.g. 'analyse NVDA') or 'which stock should I buy' for a ranked screen.",
+        ("simulation", "this app", "how do i use", "how to use", "train", "predict", "portfolio", "builder"),
+        "Using the simulator: 1) Simulations: invest paper money in a stock with a strategy, optionally backdated up "
+        "to a year. 2) Portfolio: see every simulation's live value, profit and loss, allocation and how it compares "
+        "with buy & hold. 3) Strategy lab (Simulations page): backtest SMA crossover, mean reversion, breakout or "
+        "buy & hold, then press Today's signal. 4) Strategy builder: combine price, SMA, EMA and RSI rules with a "
+        "stop-loss or take-profit, backtest them and save your own strategies. 5) Live markets: candle charts for any "
+        "ticker. 6) Ask me about any stock (e.g. 'analyse NVDA') or 'which stock should I buy' for a ranked screen.",
     ),
 ]
 

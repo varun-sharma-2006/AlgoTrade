@@ -53,6 +53,10 @@ export interface Simulation {
   status: string;
   createdAt: string;
   notes?: string | null;
+  strategyId?: string;
+  parameters?: Record<string, number>;
+  rules?: StrategyRules | null;
+  startDate?: string;
 }
 
 export interface SimulationInput {
@@ -60,6 +64,85 @@ export interface SimulationInput {
   strategy: string;
   startingCapital: number;
   notes?: string;
+  strategyId?: string;
+  parameters?: Record<string, number>;
+  rules?: StrategyRules | null;
+  startDate?: string;
+}
+
+/* ---------- Strategy Builder ---------- */
+
+export type OperandKind = "price" | "sma" | "ema" | "rsi" | "value";
+
+export interface Operand {
+  kind: OperandKind;
+  period?: number;
+  value?: number;
+}
+
+export type ConditionOp = ">" | "<" | "crosses_above" | "crosses_below";
+
+export interface Condition {
+  left: Operand;
+  op: ConditionOp;
+  right: Operand;
+}
+
+export interface StrategyRules {
+  entry: Condition[];
+  exit: Condition[];
+  stopLoss?: number | null;
+  takeProfit?: number | null;
+}
+
+export interface CustomStrategy {
+  id: string;
+  name: string;
+  description?: string | null;
+  rules: StrategyRules;
+  createdAt: string;
+}
+
+/* ---------- Portfolio ---------- */
+
+export interface PortfolioPosition {
+  id: string;
+  symbol: string;
+  strategy: string;
+  strategyId: string;
+  status: string;
+  startingCapital: number;
+  currency: string;
+  value: number;
+  pnl: number;
+  pnlPct: number;
+  dayChange?: number;
+  dayChangePct?: number;
+  inMarket?: boolean;
+  shares?: number;
+  lastPrice?: number;
+  startDate?: string;
+  startPrice?: number;
+  buyHoldValue?: number;
+  trades?: number;
+  history?: Array<{ date: string; value: number }>;
+  error?: string;
+}
+
+export interface PortfolioResponse {
+  summary: {
+    totalValue: number;
+    totalCapital: number;
+    pnl: number;
+    pnlPct: number;
+    dayChange: number;
+    dayChangePct: number;
+    positions: number;
+    inMarket: number;
+  };
+  history: Array<{ date: string; value: number }>;
+  allocation: Array<{ id: string; symbol: string; value: number; weight: number }>;
+  positions: PortfolioPosition[];
 }
 
 export interface SimulationUpdate {
@@ -98,7 +181,7 @@ export interface StrategyMetrics {
   feeBps: number;
 }
 
-export type StrategyId = "sma-crossover" | "mean-reversion" | "trend-follow";
+export type StrategyId = "sma-crossover" | "mean-reversion" | "trend-follow" | "buy-hold" | "custom";
 
 export interface TrainingPayload {
   symbol: string;
@@ -108,6 +191,7 @@ export interface TrainingPayload {
   lookback?: number;
   deviation?: number;
   channel?: number;
+  rules?: StrategyRules;
 }
 
 export interface BacktestTrade {
@@ -122,6 +206,7 @@ export interface TrainingResult {
   symbol: string;
   strategyId: StrategyId;
   parameters: Record<string, number>;
+  rules?: StrategyRules | null;
   metrics: StrategyMetrics;
   trades: BacktestTrade[];
   openTrade: BacktestTrade | null;

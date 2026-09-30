@@ -6,6 +6,10 @@ import {
   fetchAuthConfig,
   fetchMe,
   fetchVisitors,
+  fetchPortfolio,
+  fetchCustomStrategies,
+  saveCustomStrategy,
+  deleteCustomStrategy,
   googleLogin,
   fetchOverview,
   fetchSimulations,
@@ -33,18 +37,24 @@ import { SignupForm } from "./components/SignupForm";
 import { GoogleLoginPage } from "./components/GoogleLoginPage";
 import { googleSignOut } from "./components/GoogleSignIn";
 import { VisitorsPage } from "./components/VisitorsPage";
+import { PortfolioPage } from "./components/PortfolioPage";
+import { StrategyBuilder } from "./components/StrategyBuilder";
 import {
+  BuilderIcon,
   ChatIcon,
   HomeIcon,
   LiveIcon,
   LogoMark,
   LogoutIcon,
+  PortfolioIcon,
   SimulationsIcon,
   StrategyIcon,
   VisitorsIcon,
 } from "./components/Icons";
 import type {
   AuthConfig,
+  CustomStrategy,
+  StrategyRules,
   ChatAction,
   ChatMessage,
   MarketQuote,
@@ -65,7 +75,7 @@ const WATCHLIST_SYMBOLS = ["AAPL", "MSFT", "GOOGL", "AMZN", "TSLA", "NVDA"];
 const TRUTHY_ENV_FLAGS = new Set(["1", "true", "yes", "on"]);
 
 type AuthView = "login" | "signup" | "dashboard";
-type Page = "home" | "simulations" | "chat" | "strategies" | "live" | "visitors";
+type Page = "home" | "portfolio" | "simulations" | "builder" | "chat" | "strategies" | "live" | "visitors";
 
 interface SessionState {
   token: string;
@@ -86,7 +96,9 @@ const LOGIN_BYPASS_PATH = "/dev/auth/bypass";
 
 const NAV_ITEMS: Array<{ page: Page; label: string; icon: typeof HomeIcon; adminOnly?: boolean }> = [
   { page: "home", label: "Overview", icon: HomeIcon },
+  { page: "portfolio", label: "Portfolio", icon: PortfolioIcon },
   { page: "simulations", label: "Simulations", icon: SimulationsIcon },
+  { page: "builder", label: "Strategy builder", icon: BuilderIcon },
   { page: "chat", label: "Trading copilot", icon: ChatIcon },
   { page: "strategies", label: "Strategies", icon: StrategyIcon },
   { page: "live", label: "Live markets", icon: LiveIcon },
@@ -448,7 +460,7 @@ export default function App() {
       try {
         const trained =
           trainingResult && trainingResult.symbol === symbol.toUpperCase()
-            ? { strategyId: trainingResult.strategyId, parameters: trainingResult.parameters }
+            ? { strategyId: trainingResult.strategyId, parameters: trainingResult.parameters, rules: trainingResult.rules }
             : undefined;
         const result = await predictStrategy(token, symbol, trained);
         setPredictionResult(result);
@@ -514,6 +526,39 @@ export default function App() {
   }, [page]);
 
   const loadVisitors = useCallback(() => fetchVisitors(token ?? ""), [token]);
+  const loadPortfolio = useCallback(() => fetchPortfolio(token ?? ""), [token]);
+
+  const [customStrategies, setCustomStrategies] = useState<CustomStrategy[]>([]);
+  useEffect(() => {
+    if (!token) {
+      setCustomStrategies([]);
+      return;
+    }
+    fetchCustomStrategies(token)
+      .then(setCustomStrategies)
+      .catch((loadError) => {
+        if (!handleAuthFailure(loadError)) console.error(loadError);
+      });
+  }, [token, handleAuthFailure]);
+
+  const handleBuilderBacktest = useCallback(
+    (symbol: string, rules: StrategyRules) => trainStrategy(token ?? "", { symbol, strategyId: "custom", rules }),
+    [token],
+  );
+  const handleSaveCustomStrategy = useCallback(
+    async (name: string, description: string, rules: StrategyRules) => {
+      const saved = await saveCustomStrategy(token ?? "", { name, description: description || undefined, rules });
+      setCustomStrategies((previous) => [saved, ...previous]);
+    },
+    [token],
+  );
+  const handleDeleteCustomStrategy = useCallback(
+    async (id: string) => {
+      await deleteCustomStrategy(token ?? "", id);
+      setCustomStrategies((previous) => previous.filter((item) => item.id !== id));
+    },
+    [token],
+  );
 
   const handleSearchSymbols = useCallback(
     async (query: string) => {
@@ -669,6 +714,18 @@ export default function App() {
             onLogout={handleLogout}
             loading={loading || labLoading}
             error={error}
+            customStrategies={customStrategies}
+          />
+        );
+      case "portfolio":
+        return <PortfolioPage onLoad={loadPortfolio} onOpenSimulations={() => setPage("simulations")} />;
+      case "builder":
+        return (
+          <StrategyBuilder
+            saved={customStrategies}
+            onBacktest={handleBuilderBacktest}
+            onSave={handleSaveCustomStrategy}
+            onDelete={handleDeleteCustomStrategy}
           />
         );
       case "chat":

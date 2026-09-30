@@ -19,7 +19,9 @@ interface ParamField {
   initial: number;
 }
 
-export const STRATEGY_FORMS: Record<StrategyId, { label: string; fields: ParamField[] }> = {
+export type BuiltInStrategyId = Exclude<StrategyId, "custom">;
+
+export const STRATEGY_FORMS: Record<BuiltInStrategyId, { label: string; fields: ParamField[] }> = {
   "sma-crossover": {
     label: "SMA crossover",
     fields: [
@@ -38,7 +40,13 @@ export const STRATEGY_FORMS: Record<StrategyId, { label: string; fields: ParamFi
     label: "Breakout (Donchian)",
     fields: [{ key: "channel", label: "Channel length", min: 5, max: 200, initial: 20 }],
   },
+  "buy-hold": { label: "Buy & hold (baseline)", fields: [] },
 };
+
+export function strategyLabel(strategyId: string): string {
+  if (strategyId === "custom") return "Custom rules";
+  return STRATEGY_FORMS[strategyId as BuiltInStrategyId]?.label ?? strategyId;
+}
 
 const initialParams = Object.fromEntries(
   Object.values(STRATEGY_FORMS).flatMap((form) => form.fields.map((field) => [field.key, field.initial])),
@@ -76,9 +84,74 @@ export function Metrics({ metrics }: { metrics: StrategyMetrics }) {
   );
 }
 
+/** Equity curve, metrics and recent trades for a backtest (used by the strategy lab and the builder). */
+export function BacktestResults({ training, description }: { training: TrainingResult; description?: string }) {
+  const equity = training.sample.map((point) => ({ timestamp: point.timestamp, close: point.equity }));
+  const params = Object.entries(training.parameters ?? {})
+    .map(([key, value]) => `${key} ${value}`)
+    .join(", ");
+  return (
+    <div className="training-result">
+      <div className="summary">
+        <strong>{training.symbol}</strong>
+        <span className="subtle">{description ?? [strategyLabel(training.strategyId), params].filter(Boolean).join(" · ")}</span>
+        <span className="subtle">
+          {new Date(training.period.start).toLocaleDateString()} – {new Date(training.period.end).toLocaleDateString()} ·{" "}
+          {training.metrics.feeBps} bps fee per trade
+        </span>
+      </div>
+      {equity.length ? (
+        <div className="equity-curve">
+          <span className="subtle">Equity curve (last {equity.length} days, starts at 1.0)</span>
+          <SparklineChart points={equity} stretch />
+        </div>
+      ) : null}
+      <Metrics metrics={training.metrics} />
+      {training.trades.length || training.openTrade ? (
+        <table className="trades-table">
+          <thead>
+            <tr>
+              <th>Entry</th>
+              <th>Exit</th>
+              <th>Return</th>
+            </tr>
+          </thead>
+          <tbody>
+            {[...training.trades].reverse().slice(0, 5).map((trade) => (
+              <tr key={trade.entryDate}>
+                <td>
+                  {new Date(trade.entryDate).toLocaleDateString()} @ {trade.entryPrice.toFixed(2)}
+                </td>
+                <td>
+                  {new Date(trade.exitDate).toLocaleDateString()} @ {trade.exitPrice.toFixed(2)}
+                </td>
+                <td className={trade.return >= 0 ? "positive" : "negative"}>{pct(trade.return)}</td>
+              </tr>
+            ))}
+            {training.openTrade ? (
+              <tr>
+                <td>
+                  {new Date(training.openTrade.entryDate).toLocaleDateString()} @{" "}
+                  {training.openTrade.entryPrice.toFixed(2)}
+                </td>
+                <td>open</td>
+                <td className={training.openTrade.return >= 0 ? "positive" : "negative"}>
+                  {pct(training.openTrade.return)}
+                </td>
+              </tr>
+            ) : null}
+          </tbody>
+        </table>
+      ) : (
+        <p className="empty">The strategy never entered a trade in this period.</p>
+      )}
+    </div>
+  );
+}
+
 export function StrategyTrainer({ onTrain, onPredict, training, prediction, loading }: StrategyTrainerProps) {
   const [symbol, setSymbol] = useState("AAPL");
-  const [strategyId, setStrategyId] = useState<StrategyId>("sma-crossover");
+  const [strategyId, setStrategyId] = useState<BuiltInStrategyId>("sma-crossover");
   const [params, setParams] = useState<Record<string, number>>(initialParams);
   const form = STRATEGY_FORMS[strategyId];
 
@@ -87,8 +160,6 @@ export function StrategyTrainer({ onTrain, onPredict, training, prediction, load
     const values = Object.fromEntries(form.fields.map((field) => [field.key, params[field.key]]));
     onTrain({ symbol, strategyId, ...values });
   };
-
-  const equity = training?.sample.map((point) => ({ timestamp: point.timestamp, close: point.equity })) ?? [];
 
   return (
     <section className="panel strategy-lab">
@@ -104,7 +175,7 @@ export function StrategyTrainer({ onTrain, onPredict, training, prediction, load
         </label>
         <label>
           <span>Strategy</span>
-          <select value={strategyId} onChange={(event) => setStrategyId(event.target.value as StrategyId)}>
+          <select value={strategyId} onChange={(event) => setStrategyId(event.target.value as BuiltInStrategyId)}>
             {Object.entries(STRATEGY_FORMS).map(([id, option]) => (
               <option key={id} value={id}>
                 {option.label}
@@ -141,66 +212,7 @@ export function StrategyTrainer({ onTrain, onPredict, training, prediction, load
       </form>
 
       {training ? (
-        <div className="training-result">
-          <div className="summary">
-            <strong>{training.symbol}</strong>
-            <span className="subtle">
-              {STRATEGY_FORMS[training.strategyId]?.label ?? training.strategyId} ·{" "}
-              {Object.entries(training.parameters ?? {})
-                .map(([key, value]) => `${key} ${value}`)
-                .join(", ")}
-            </span>
-            <span className="subtle">
-              {new Date(training.period.start).toLocaleDateString()} – {new Date(training.period.end).toLocaleDateString()} ·{" "}
-              {training.metrics.feeBps} bps fee per trade
-            </span>
-          </div>
-          {equity.length ? (
-            <div className="equity-curve">
-              <span className="subtle">Equity curve (last {equity.length} days, starts at 1.0)</span>
-              <SparklineChart points={equity} stretch />
-            </div>
-          ) : null}
-          <Metrics metrics={training.metrics} />
-          {training.trades.length || training.openTrade ? (
-            <table className="trades-table">
-              <thead>
-                <tr>
-                  <th>Entry</th>
-                  <th>Exit</th>
-                  <th>Return</th>
-                </tr>
-              </thead>
-              <tbody>
-                {[...training.trades].reverse().slice(0, 5).map((trade) => (
-                  <tr key={trade.entryDate}>
-                    <td>
-                      {new Date(trade.entryDate).toLocaleDateString()} @ {trade.entryPrice.toFixed(2)}
-                    </td>
-                    <td>
-                      {new Date(trade.exitDate).toLocaleDateString()} @ {trade.exitPrice.toFixed(2)}
-                    </td>
-                    <td className={trade.return >= 0 ? "positive" : "negative"}>{pct(trade.return)}</td>
-                  </tr>
-                ))}
-                {training.openTrade ? (
-                  <tr>
-                    <td>
-                      {new Date(training.openTrade.entryDate).toLocaleDateString()} @{" "}
-                      {training.openTrade.entryPrice.toFixed(2)}
-                    </td>
-                    <td>open</td>
-                    <td className={training.openTrade.return >= 0 ? "positive" : "negative"}>
-                      {pct(training.openTrade.return)}
-                    </td>
-                  </tr>
-                ) : null}
-              </tbody>
-            </table>
-          ) : (
-            <p className="empty">The strategy never entered a trade in this period.</p>
-          )}
-        </div>
+        <BacktestResults training={training} />
       ) : (
         <p className="empty">Run a backtest to see how the strategy would have traded.</p>
       )}

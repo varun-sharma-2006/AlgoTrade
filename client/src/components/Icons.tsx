@@ -78,6 +78,21 @@ export const LiveIcon = (p: IconProps) => (
   </Icon>
 );
 
+export const PortfolioIcon = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M12 3a9 9 0 1 0 9 9h-9Z" />
+    <path d="M15 3.5A9 9 0 0 1 20.5 9H15Z" />
+  </Icon>
+);
+
+export const BuilderIcon = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M4 7h10M18 7h2M4 17h4M12 17h8" />
+    <circle cx="16" cy="7" r="2" />
+    <circle cx="10" cy="17" r="2" />
+  </Icon>
+);
+
 export const VisitorsIcon = (p: IconProps) => (
   <Icon {...p}>
     <circle cx="9" cy="8" r="3.5" />

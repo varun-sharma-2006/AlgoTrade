@@ -1,12 +1,14 @@
 from __future__ import annotations
 
+from datetime import timedelta
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 
+from backend import strategies
 from backend.deps import get_current_user, get_db
 from backend.schemas import SimulationInput, SimulationUpdate
-from backend.stores import Store
+from backend.stores import Store, now
 
 router = APIRouter(tags=["simulations"])
 
@@ -18,11 +20,24 @@ async def list_simulations(
     return await store.list_simulations(user["id"])
 
 
+MAX_BACKDATE_DAYS = 365  # portfolio valuation fetches 2 years, leaving a year of warm-up for indicators
+
+
 @router.post("/simulations")
 async def create_simulation(
     payload: SimulationInput, user: dict[str, Any] = Depends(get_current_user), store: Store = Depends(get_db)
 ) -> dict[str, Any]:
-    return await store.add_simulation(user["id"], payload)
+    params = strategies.DEFAULT_PARAMS.get(payload.strategyId, {}) | payload.parameters
+    rules = payload.rules.model_dump() if payload.rules else None
+    problem = strategies.validate(payload.strategyId, params, rules)
+    if problem:
+        raise HTTPException(status_code=422, detail=problem)
+    today = now().date()
+    if payload.startDate and payload.startDate > today:
+        raise HTTPException(status_code=422, detail="The start date can't be in the future")
+    if payload.startDate and payload.startDate < today - timedelta(days=MAX_BACKDATE_DAYS):
+        raise HTTPException(status_code=422, detail="The start date can be at most one year ago")
+    return await store.add_simulation(user["id"], payload.model_copy(update={"parameters": params}))
 
 
 @router.patch("/simulations/{sim_id}")
