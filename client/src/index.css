@@ -3299,18 +3299,15 @@ a.link-button:hover {
   justify-items: start;
 }
 
-/* ---------- Sign-in screens: split layout, navy and teal ---------- */
+/* ---------- Sign-in screens: split layout in the gold theme ---------- */
 
 .auth-split {
-  --auth-bg: #0d1626;
-  --auth-card: #13202f;
-  --auth-line: #22344a;
-  --auth-input: #192a3d;
-  --auth-text: #e8eef6;
-  --auth-muted: #9fb0c4;
-  --auth-teal: #5fd0d6;
-  --auth-button: #0e7c86;
-  --auth-button-hover: #0f8f9a;
+  --auth-card: var(--surface);
+  --auth-line: var(--line-gold);
+  --auth-input: rgba(8, 9, 14, 0.7);
+  --auth-text: var(--text);
+  --auth-muted: var(--text-muted);
+  --auth-accent: var(--gold-light);
 
   position: relative;
   z-index: 0;
@@ -3320,7 +3317,11 @@ a.link-button:hover {
   align-items: center;
   gap: clamp(2rem, 6vw, 7rem);
   padding: clamp(2rem, 5vh, 3rem) clamp(16px, 8vw, 9rem);
-  background: var(--auth-bg);
+  /* The page's ink background with soft gold glows. */
+  background:
+    radial-gradient(900px 520px at 10% 0%, rgba(212, 175, 106, 0.14), transparent 60%),
+    radial-gradient(800px 600px at 100% 100%, rgba(60, 86, 160, 0.14), transparent 60%),
+    linear-gradient(180deg, var(--ink-2), var(--ink));
   color: var(--auth-text);
   font-family: var(--font-sans);
 }
@@ -3332,7 +3333,7 @@ a.link-button:hover {
 }
 
 .auth-eyebrow {
-  color: var(--auth-teal);
+  color: var(--auth-accent);
   font-size: 0.72rem;
   font-weight: 600;
   letter-spacing: 0.14em;
@@ -3341,16 +3342,20 @@ a.link-button:hover {
 
 .auth-hero h1 {
   margin: 0;
-  font-family: var(--font-sans);
+  font-family: var(--font-display);
   font-size: clamp(2.6rem, 4.3vw, 4.1rem);
-  font-weight: 700;
+  font-weight: 600;
   line-height: 1.08;
-  letter-spacing: -0.03em;
+  letter-spacing: -0.01em;
   color: var(--auth-text);
 }
 
 .auth-accent {
-  color: var(--auth-teal);
+  background: var(--gold-gradient);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  font-style: italic;
 }
 
 .auth-hero > p {
@@ -3380,15 +3385,15 @@ a.link-button:hover {
 .auth-feature-icon {
   display: inline-grid;
   place-items: center;
-  color: var(--auth-teal);
+  color: var(--auth-accent);
 }
 
 .auth-features li.featured .auth-feature-icon {
   width: 2.1rem;
   height: 2.1rem;
-  border-radius: 8px;
-  background: var(--auth-input);
-  border: 1px solid var(--auth-line);
+  border-radius: 9px;
+  background: rgba(212, 175, 106, 0.08);
+  border: 1px solid var(--line-gold-strong);
 }
 
 .auth-footnote {
@@ -3410,15 +3415,26 @@ a.link-button:hover {
 }
 
 .auth-panel {
+  position: relative;
   width: min(420px, 100%);
   display: grid;
   gap: 1rem;
   padding: 2rem 2rem 1.6rem;
-  border-radius: 14px;
+  border-radius: var(--radius-lg);
   background: var(--auth-card);
   border: 1px solid var(--auth-line);
-  border-top: 2px solid var(--auth-teal);
-  box-shadow: 0 30px 60px -30px rgba(0, 0, 0, 0.7);
+  box-shadow: var(--shadow-lg), 0 0 0 1px rgba(212, 175, 106, 0.04) inset;
+  backdrop-filter: blur(18px);
+  overflow: hidden;
+}
+
+/* A thin gold rule along the card's top edge. */
+.auth-panel::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto;
+  height: 2px;
+  background: var(--gold-gradient);
 }
 
 .auth-brand {
@@ -3434,17 +3450,18 @@ a.link-button:hover {
   place-items: center;
   width: 2.3rem;
   height: 2.3rem;
-  border-radius: 8px;
-  background: var(--auth-input);
-  color: var(--auth-teal);
+  border-radius: 10px;
+  background: #0d0f16;
+  border: 1px solid var(--line-gold-strong);
+  color: var(--gold);
 }
 
 .auth-panel h2 {
   margin: 0;
-  font-family: var(--font-sans);
-  font-size: 1.85rem;
-  font-weight: 700;
-  letter-spacing: -0.02em;
+  font-family: var(--font-display);
+  font-size: 1.95rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
   color: var(--auth-text);
 }
 
@@ -3484,13 +3501,13 @@ a.link-button:hover {
 }
 
 .auth-form input:hover {
-  border-color: #33506e;
+  border-color: var(--line-gold-strong);
 }
 
 .auth-form input:focus {
-  border-color: var(--auth-teal);
-  box-shadow: 0 0 0 3px rgba(95, 208, 214, 0.18);
-  background: var(--auth-input);
+  border-color: var(--gold);
+  box-shadow: 0 0 0 3px rgba(212, 175, 106, 0.16);
+  background: rgba(8, 9, 14, 0.9);
 }
 
 .auth-hint {
@@ -3501,25 +3518,24 @@ a.link-button:hover {
 }
 
 .auth-hint a {
-  color: var(--auth-teal);
+  color: var(--auth-accent);
 }
 
 .auth-submit {
   height: 2.9rem;
   margin-top: 0.2rem;
-  border-radius: 8px;
+  border-radius: 10px;
   border: none;
-  background: var(--auth-button);
-  background-image: none;
-  color: #eafcfd;
-  font-weight: 600;
-  box-shadow: none;
+  background: var(--gold-gradient);
+  color: #1a1306;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  box-shadow: var(--gold-glow);
 }
 
 .auth-submit:hover:not(:disabled) {
-  background: var(--auth-button-hover);
-  transform: none;
-  box-shadow: none;
+  filter: brightness(1.06);
+  transform: translateY(-1px);
 }
 
 .auth-switch {
@@ -3536,7 +3552,7 @@ a.link-button:hover {
   background: none;
   background-image: none;
   box-shadow: none;
-  color: var(--auth-teal);
+  color: var(--auth-accent);
   font-weight: 600;
   font-size: inherit;
   cursor: pointer;
