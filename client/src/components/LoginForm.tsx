@@ -1,5 +1,5 @@
-import { LogoMark } from "./Icons";
 import { FormEvent, useState } from "react";
+import { AuthBrand, AuthLayout } from "./AuthLayout";
 
 interface LoginFormProps {
   onSubmit: (email: string, password: string) => Promise<void> | void;
@@ -26,27 +26,23 @@ export function LoginForm({ onSubmit, onSwitchToSignup, loading, error }: LoginF
   };
 
   return (
-    <div className="card auth-card">
-      <div className="login-card-logo">
-        <LogoMark size={48} />
-      </div>
-      <h1>Welcome back</h1>
-      <p className="auth-lede">
-        Sign in to resume your trading simulations.
-      </p>
+    <AuthLayout>
+      <AuthBrand />
+      <h2>Welcome back</h2>
+      <p className="auth-lede">Sign in to pick up your research and paper-trading simulations.</p>
 
       {error && <div className="error-banner">{error}</div>}
       {validationError && <div className="error-banner">{validationError}</div>}
 
-      <form onSubmit={handleSubmit} noValidate>
+      <form className="auth-form" onSubmit={handleSubmit} noValidate>
         <label>
           <span>Email</span>
           <input
+            type="email"
             autoComplete="email"
             inputMode="email"
             value={email}
             onChange={(event) => setEmail(event.target.value)}
-            placeholder="jane.doe@example.com"
           />
         </label>
 
@@ -57,25 +53,20 @@ export function LoginForm({ onSubmit, onSwitchToSignup, loading, error }: LoginF
             autoComplete="current-password"
             value={password}
             onChange={(event) => setPassword(event.target.value)}
-            placeholder="••••••••"
           />
         </label>
 
-        <button type="submit" disabled={loading}>
-          {loading ? "Signing in..." : "Sign in"}
+        <button type="submit" className="auth-submit" disabled={loading}>
+          {loading ? "Signing in…" : "Sign in"}
         </button>
       </form>
 
-      <footer>
-        <span>Need an account? </span>
-        <button
-          type="button"
-          onClick={onSwitchToSignup}
-          className="link-button"
-        >
-          Create one
+      <p className="auth-switch">
+        New here?{" "}
+        <button type="button" onClick={onSwitchToSignup} className="auth-link">
+          Create an account
         </button>
-      </footer>
-    </div>
+      </p>
+    </AuthLayout>
   );
 }

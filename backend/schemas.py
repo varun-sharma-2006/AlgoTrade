@@ -7,11 +7,31 @@ from typing import Literal
 
 from pydantic import BaseModel, EmailStr, Field, model_validator
 
+# The most common passwords in breach lists (all at least 8 characters, so the length rule doesn't catch them).
+COMMON_PASSWORDS = {
+    "password", "password1", "password12", "password123", "password!", "passw0rd", "p@ssw0rd", "p@ssword",
+    "12345678", "123456789", "1234567890", "12341234", "11111111", "00000000", "88888888", "87654321",
+    "123123123", "1q2w3e4r", "1qaz2wsx", "qwertyui", "qwerty12", "qwerty123", "qwertyuiop", "asdfghjk",
+    "asdfghjkl", "zxcvbnm1", "iloveyou", "iloveyou1", "sunshine", "princess", "football", "baseball",
+    "welcome1", "welcome123", "letmein1", "trustno1", "superman", "starwars", "whatever", "abc12345",
+    "abcd1234", "admin123", "administrator", "changeme", "computer", "internet", "michael1", "jennifer",
+    "charlie1", "monkey12", "dragon12", "football1", "1234qwer", "qwer1234", "zaq12wsx", "aa123456",
+}  # fmt: skip
+
 
 class SignupRequest(BaseModel):
     email: EmailStr
-    password: str = Field(min_length=6)
+    password: str = Field(min_length=8, max_length=72)
     name: str = Field(min_length=1, max_length=120)
+
+    @model_validator(mode="after")
+    def check_password(self) -> SignupRequest:
+        lowered = self.password.lower()
+        if lowered in COMMON_PASSWORDS or len(set(lowered)) <= 2:
+            raise ValueError("That password is too common; please choose a less guessable one")
+        if lowered == str(self.email).lower() or lowered == str(self.email).split("@")[0].lower():
+            raise ValueError("Your password can't be your email address")
+        return self
 
 
 class LoginRequest(BaseModel):

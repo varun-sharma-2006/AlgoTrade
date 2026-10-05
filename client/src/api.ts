@@ -101,10 +101,23 @@ export async function request<T>(path: string, options: RequestOptions = {}): Pr
       window.localStorage.removeItem("algo-trade-session");
     }
     const detail = (data as { detail?: unknown } | undefined)?.detail ?? response.statusText;
-    throw new ApiError(response.status, typeof detail === "string" ? detail : JSON.stringify(detail));
+    throw new ApiError(response.status, describeDetail(detail));
   }
 
   return data as T;
+}
+
+/** Readable text for FastAPI's error detail (a string, or a list of validation errors). */
+export function describeDetail(detail: unknown): string {
+  if (typeof detail === "string") return detail;
+  if (Array.isArray(detail)) {
+    const messages = detail
+      .map((item) => (item && typeof item === "object" && "msg" in item ? String((item as { msg: unknown }).msg) : ""))
+      .map((message) => message.replace(/^Value error, /, ""))
+      .filter(Boolean);
+    if (messages.length) return messages.join(". ");
+  }
+  return JSON.stringify(detail);
 }
 
 export interface AuthResponse {
