@@ -1,5 +1,5 @@
-import { LogoMark } from "./Icons";
 import { FormEvent, useState } from "react";
+import { AuthBrand, AuthLayout } from "./AuthLayout";
 
 interface SignupFormProps {
   onSubmit: (name: string, email: string, password: string) => Promise<void> | void;
@@ -8,6 +8,7 @@ interface SignupFormProps {
   error?: string | null;
 }
 
+const MIN_PASSWORD_LENGTH = 8;
 const MAX_PASSWORD_LENGTH = 72;
 
 export function SignupForm({ onSubmit, onSwitchToLogin, loading, error }: SignupFormProps) {
@@ -30,8 +31,8 @@ export function SignupForm({ onSubmit, onSwitchToLogin, loading, error }: Signup
       return;
     }
 
-    if (password.length < 8) {
-      setValidationError("Password must be at least 8 characters long.");
+    if (password.length < MIN_PASSWORD_LENGTH) {
+      setValidationError(`Password must be at least ${MIN_PASSWORD_LENGTH} characters long.`);
       return;
     }
 
@@ -44,35 +45,26 @@ export function SignupForm({ onSubmit, onSwitchToLogin, loading, error }: Signup
   };
 
   return (
-    <div className="card auth-card">
-      <div className="login-card-logo">
-        <LogoMark size={48} />
-      </div>
-      <h1>Create your account</h1>
-      <p className="auth-lede">
-        Build and monitor personalised trading simulations.
-      </p>
+    <AuthLayout>
+      <AuthBrand />
+      <h2>Create your account</h2>
+      <p className="auth-lede">Research strategies and run paper-trading simulations — no real money involved.</p>
 
       {error && <div className="error-banner">{error}</div>}
       {validationError && <div className="error-banner">{validationError}</div>}
 
-      <form onSubmit={handleSubmit} noValidate>
+      <form className="auth-form" onSubmit={handleSubmit} noValidate>
         <label>
           <span>Name</span>
-          <input
-            value={name}
-            onChange={(event) => setName(event.target.value)}
-            placeholder="Jane Doe"
-            autoComplete="name"
-          />
+          <input value={name} onChange={(event) => setName(event.target.value)} autoComplete="name" />
         </label>
 
         <label>
           <span>Email</span>
           <input
+            type="email"
             value={email}
             onChange={(event) => setEmail(event.target.value)}
-            placeholder="jane.doe@example.com"
             autoComplete="email"
             inputMode="email"
           />
@@ -85,26 +77,25 @@ export function SignupForm({ onSubmit, onSwitchToLogin, loading, error }: Signup
             value={password}
             onChange={(event) => setPassword(event.target.value)}
             maxLength={MAX_PASSWORD_LENGTH}
-            placeholder="Create a strong password"
             autoComplete="new-password"
+            aria-describedby="password-hint"
           />
         </label>
+        <small id="password-hint" className="auth-hint password-hint">
+          At least {MIN_PASSWORD_LENGTH} characters. Very common passwords are rejected.
+        </small>
 
-        <button type="submit" disabled={loading}>
-          {loading ? "Creating account..." : "Sign up"}
+        <button type="submit" className="auth-submit" disabled={loading}>
+          {loading ? "Creating account…" : "Create account"}
         </button>
       </form>
 
-      <footer>
-        <span>Already registered? </span>
-        <button
-          type="button"
-          onClick={onSwitchToLogin}
-          className="link-button"
-        >
+      <p className="auth-switch">
+        Already have an account?{" "}
+        <button type="button" onClick={onSwitchToLogin} className="auth-link">
           Sign in instead
         </button>
-      </footer>
-    </div>
+      </p>
+    </AuthLayout>
   );
 }

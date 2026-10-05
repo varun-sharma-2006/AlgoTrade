@@ -180,3 +180,14 @@ def test_push_subscription_routes(client, monkeypatch):
     assert client.post("/alerts/test", headers=headers).status_code == 422  # no channels left
     client.post("/push/subscribe", headers=headers, json=sub)
     assert client.post("/push/unsubscribe", headers=headers, json=sub).json() == {"subscribed": False}
+
+
+# ---------- Sign-up password rules ----------
+
+
+def test_signup_rejects_short_common_and_email_passwords(client):
+    body = {"email": "rules@example.com", "name": "R"}
+    for weak in ("short1", "password123", "QWERTY123", "aaaaaaaaaa", "rules@example.com", "rules"):
+        response = client.post("/auth/signup", json=body | {"password": weak})
+        assert response.status_code == 422, weak
+    assert client.post("/auth/signup", json=body | {"password": "tide-pool-ledger"}).status_code == 200

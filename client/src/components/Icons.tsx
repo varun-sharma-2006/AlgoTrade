@@ -129,6 +129,13 @@ export const LearnIcon = (p: IconProps) => (
   </Icon>
 );
 
+export const LayersIcon = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M12 3 3 8l9 5 9-5Z" />
+    <path d="m3 12.5 9 5 9-5M3 17l9 5 9-5" />
+  </Icon>
+);
+
 export const VisitorsIcon = (p: IconProps) => (
   <Icon {...p}>
     <circle cx="9" cy="8" r="3.5" />
