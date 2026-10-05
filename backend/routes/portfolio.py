@@ -5,10 +5,10 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 
-from backend import portfolio, strategies
+from backend import costs, portfolio, strategies
 from backend.config import logger, settings
 from backend.deps import get_current_user, get_db
-from backend.market import fetch_chart
+from backend.market import fetch_chart, fx_rates
 from backend.schemas import CustomStrategyInput
 from backend.stores import Store
 
@@ -23,8 +23,19 @@ def _chart(symbol: str) -> dict[str, Any] | None:
         return None
 
 
-def _position(sim: dict[str, Any], chart: dict[str, Any] | None) -> dict[str, Any]:
+def _fx(currency: str | None) -> dict[str, float] | None:
+    try:
+        return fx_rates(currency, settings.base_currency, settings.history_period)
+    except HTTPException:
+        logger.warning("No exchange rate for %s -> %s", currency, settings.base_currency)
+        return None
+
+
+def _position(
+    sim: dict[str, Any], chart: dict[str, Any] | None, rates: dict[str, float] | None = None
+) -> dict[str, Any]:
     strategy_id = sim.get("strategyId") or "buy-hold"  # simulations created before strategies were tracked
+    currency = (chart or {}).get("currency") or settings.base_currency
     base = {
         "id": sim["id"],
         "symbol": sim["symbol"],
@@ -32,13 +43,20 @@ def _position(sim: dict[str, Any], chart: dict[str, Any] | None) -> dict[str, An
         "strategyId": strategy_id,
         "status": sim.get("status", "active"),
         "startingCapital": float(sim["startingCapital"]),
-        "currency": (chart or {}).get("currency") or "USD",
+        "currency": currency,
+        "baseCurrency": settings.base_currency,
     }
     if not chart or not chart.get("points"):
         return base | {"value": base["startingCapital"], "pnl": 0.0, "pnlPct": 0.0, "error": "No price data"}
-    closes = [p["close"] for p in chart["points"]]
-    timestamps = [p["timestamp"] for p in chart["points"]]
+    points = chart["points"]
+    closes = [p["close"] for p in points]
+    timestamps = [p["timestamp"] for p in points]
+    bars = {key: [p.get(key) for p in points] for key in ("open", "high", "low", "volume")}
     params = strategies.DEFAULT_PARAMS.get(strategy_id, {}) | (sim.get("parameters") or {})
+    cost = costs.cost_model(
+        sim["symbol"], settings.trading_fee_bps, settings.slippage_bps, settings.india_brokerage_bps
+    )
+    fx = portfolio.align_fx([ts[:10] for ts in timestamps], rates)
     valued = portfolio.value_simulation(
         closes,
         timestamps,
@@ -47,9 +65,15 @@ def _position(sim: dict[str, Any], chart: dict[str, Any] | None) -> dict[str, An
         rules=sim.get("rules"),
         start_date=sim.get("startDate") or str(sim["createdAt"])[:10],
         capital=base["startingCapital"],
-        fee_bps=settings.trading_fee_bps + settings.slippage_bps,
+        fee_bps=cost["buyFeeBps"],
+        sell_fee_bps=cost["sellFeeBps"],
+        slippage_bps=settings.slippage_bps,
+        bars=bars,
+        execution=settings.execution,
+        fx=fx,
     )
-    return base | valued
+    converted = currency.upper() != settings.base_currency or currency in {"GBp", "ZAc", "ILA"}
+    return base | valued | {"fxConverted": bool(fx), "fxMissing": converted and not fx}
 
 
 @router.get("/portfolio")
@@ -61,9 +85,17 @@ async def get_portfolio(
     symbols = sorted({sim["symbol"] for sim in sims})
     with ThreadPoolExecutor(max_workers=min(8, max(len(symbols), 1))) as pool:
         charts = dict(zip(symbols, pool.map(_chart, symbols), strict=True))
-    positions = [_position(sim, charts.get(sim["symbol"])) for sim in sims]
+        currencies = sorted({(chart or {}).get("currency") or settings.base_currency for chart in charts.values()})
+        rates = dict(zip(currencies, pool.map(_fx, currencies), strict=True))
+    positions = [
+        _position(sim, charts.get(sim["symbol"]), rates.get((charts.get(sim["symbol"]) or {}).get("currency")))
+        for sim in sims
+    ]
     positions.sort(key=lambda p: p["value"], reverse=True)
-    return portfolio.combine(positions) | {"positions": positions}
+    combined = portfolio.combine(positions)
+    combined["summary"]["baseCurrency"] = settings.base_currency
+    combined["summary"]["execution"] = settings.execution
+    return combined | {"positions": positions}
 
 
 @router.get("/strategies/custom")

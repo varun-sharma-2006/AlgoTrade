@@ -22,6 +22,13 @@ import type {
   StrategyRules,
   WalkForwardPayload,
   WalkForwardResult,
+  RobustnessPayload,
+  RobustnessResult,
+  BasketPayload,
+  BasketResult,
+  AlertSettings,
+  AlertSettingsResponse,
+  DailySignal,
 } from "./types";
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
@@ -202,10 +209,43 @@ export function runWalkForward(token: string, payload: WalkForwardPayload) {
   return request<WalkForwardResult>("/analytics/walk-forward", { method: "POST", body: payload, token });
 }
 
+export function runRobustness(token: string, payload: RobustnessPayload) {
+  return request<RobustnessResult>("/analytics/robustness", { method: "POST", body: payload, token });
+}
+
+export function runBasket(token: string, payload: BasketPayload) {
+  return request<BasketResult>("/analytics/basket", { method: "POST", body: payload, token });
+}
+
+export function exportPine(token: string, name: string, rules: StrategyRules) {
+  return request<{ script: string }>("/strategies/pine", { method: "POST", body: { name, rules }, token });
+}
+
+export function fetchAlertSettings(token: string) {
+  return request<AlertSettingsResponse>("/alerts/settings", { token });
+}
+
+export function saveAlertSettings(token: string, settings: AlertSettings) {
+  return request<AlertSettingsResponse>("/alerts/settings", { method: "PUT", body: settings, token });
+}
+
+export function sendTestAlert(token: string) {
+  return request<{ sent: Record<string, boolean> }>("/alerts/test", { method: "POST", token });
+}
+
+export function fetchDailySignals(token: string) {
+  return request<DailySignal[]>("/alerts/signals", { token });
+}
+
 export function predictStrategy(
   token: string,
   symbol: string,
-  strategy?: { strategyId: string; parameters: Record<string, number>; rules?: StrategyRules | null },
+  strategy?: {
+    strategyId: string;
+    parameters: Record<string, number>;
+    rules?: StrategyRules | null;
+    allowShort?: boolean;
+  },
 ) {
   // Sending the strategy lets any server instance answer, even one that didn't run the backtest.
   return request<PredictionResult>("/analytics/predict", {

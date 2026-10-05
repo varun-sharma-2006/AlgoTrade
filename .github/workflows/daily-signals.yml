@@ -1,0 +1,20 @@
+# Runs the daily trade-signal job for deployments without Vercel Cron (Render, Hugging Face, Docker).
+# Set the repository variable APP_URL to the API's base URL (e.g. https://my-app.onrender.com, or
+# https://my-app.vercel.app/api) and the secret CRON_SECRET to the same value as the backend's CRON_SECRET.
+name: Daily signals
+
+on:
+  schedule:
+    - cron: "30 22 * * 1-5" # after the US close, Monday to Friday
+  workflow_dispatch:
+
+jobs:
+  signals:
+    if: vars.APP_URL != ''
+    runs-on: ubuntu-latest
+    steps:
+      - name: Run the daily signal job
+        run: |
+          curl --fail --silent --show-error --max-time 120 \
+            -X POST -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
+            "${{ vars.APP_URL }}/cron/daily"

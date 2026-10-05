@@ -24,11 +24,12 @@ STRATEGY_NAMES = {
     "sma-crossover": "SMA crossover",
     "mean-reversion": "Mean reversion (Bollinger)",
     "trend-follow": "Breakout (Donchian)",
-    "ml-logistic": "Machine learning (logistic regression)",
+    "regime-switch": "Regime switching (trend vs range)",
+    "ml-logistic": "Machine learning (logistic regression or boosted trees)",
     "buy-hold": "Buy & hold",
 }
 BUILT_IN = list(STRATEGY_NAMES)
-TUNABLE = ["sma-crossover", "mean-reversion", "trend-follow", "ml-logistic"]
+TUNABLE = ["sma-crossover", "mean-reversion", "trend-follow", "regime-switch", "ml-logistic"]
 PARAMETER_SCHEMA = {
     "shortWindow": {"type": "integer", "description": "SMA crossover: short moving average, days (default 20)"},
     "longWindow": {"type": "integer", "description": "SMA crossover: long moving average, days (default 60)"},
@@ -36,6 +37,16 @@ PARAMETER_SCHEMA = {
     "deviation": {"type": "number", "description": "Mean reversion: band width in standard deviations (default 2)"},
     "channel": {"type": "integer", "description": "Breakout: Donchian channel length, days (default 20)"},
     "threshold": {"type": "number", "description": "ML: probability of a rise needed to buy, 0.3-0.8 (default 0.52)"},
+    "modelType": {
+        "type": "integer",
+        "description": "ML: 0 = logistic regression (default), 1 = gradient-boosted trees",
+    },
+    "horizon": {"type": "integer", "description": "ML: predict the direction this many trading days ahead (default 1)"},
+    "erWindow": {"type": "integer", "description": "Regime switching: efficiency-ratio window, days (default 20)"},
+    "erThreshold": {
+        "type": "number",
+        "description": "Regime switching: efficiency ratio above which the market counts as trending (default 0.3)",
+    },
 }
 SYMBOL = {"type": "string", "description": "Yahoo Finance ticker, e.g. AAPL, RELIANCE.NS, BTC-USD"}
 
@@ -123,7 +134,10 @@ def label(strategy_id: str, params: dict[str, float]) -> str:
     if strategy_id == "trend-follow":
         return f"Breakout {int(params['channel'])}-day"
     if strategy_id == "ml-logistic":
-        return f"ML (P(up) ≥ {params['threshold']:.2f})"
+        model = "boosted trees" if int(params.get("modelType", 0)) == 1 else "logistic"
+        return f"ML {model} (P(up) ≥ {params['threshold']:.2f})"
+    if strategy_id == "regime-switch":
+        return f"Regime switch (ER {int(params['erWindow'])}, {params['erThreshold']:g})"
     return STRATEGY_NAMES.get(strategy_id, strategy_id)
 
 
@@ -140,6 +154,8 @@ def summarise_backtest(result: dict[str, Any]) -> dict[str, Any]:
         "periodEnd": result["period"]["end"][:10],
         "strategyReturn": m["totalReturn"],
         "buyHoldReturn": m["buyHoldReturn"],
+        "benchmark": bench.get("name") or "S&P 500",
+        # Kept under its original name; for Indian stocks the benchmark is the NIFTY 50 (see "benchmark").
         "sp500Return": bench.get("totalReturn"),
         "annualizedReturn": m["annualizedReturn"],
         "volatility": m["volatility"],
@@ -149,6 +165,9 @@ def summarise_backtest(result: dict[str, Any]) -> dict[str, Any]:
         "buyHoldSharpe": result["buyHold"]["sharpe"],
         "buyHoldMaxDrawdown": result["buyHold"]["maxDrawdown"],
         "betaToSp500": bench.get("beta"),
+        "valueAtRisk95": m.get("var95"),
+        "profitFactor": m.get("profitFactor"),
+        "execution": m.get("execution"),
         "trades": m["trades"],
         "winRate": m["winRate"],
         "timeInMarket": m["exposure"],
@@ -294,6 +313,7 @@ class Toolbox:
 STRATEGY_WORDS = [
     ("ml-logistic", r"machine[- ]learning|\bml\b|logistic|\bai model|predictive model"),
     ("mean-reversion", r"mean[- ]reversion|bollinger"),
+    ("regime-switch", r"regime|adaptive|efficiency ratio"),
     ("trend-follow", r"breakout|donchian|trend[- ]follow"),
     ("buy-hold", r"buy[- ](?:and|&|n)[- ]hold"),
     ("sma-crossover", r"\bsma\b|moving[- ]average|crossover|golden cross"),
@@ -316,13 +336,18 @@ def describe_backtest(s: dict[str, Any]) -> str:
         f"Backtest: {s['symbol']} · {s['strategy']} · {s['periodStart']} to {s['periodEnd']}, "
         f"{s['costPerTradeBps']:g} bps cost per trade.",
         f"- Strategy return {_pct(s['strategyReturn'])} vs buy & hold {_pct(s['buyHoldReturn'])} "
-        f"({'beat' if beat >= 0 else 'lagged'} it by {abs(beat) * 100:.1f} points); S&P 500 {_pct(s['sp500Return'])}.",
+        f"({'beat' if beat >= 0 else 'lagged'} it by {abs(beat) * 100:.1f} points); "
+        f"{s.get('benchmark', 'S&P 500')} {_pct(s['sp500Return'])}.",
         f"- Risk: Sharpe {s['sharpe']:.2f} (buy & hold {s['buyHoldSharpe']:.2f}), Sortino {s['sortino']:.2f}, "
         f"volatility {s['volatility'] * 100:.1f}%, max drawdown {s['maxDrawdown'] * 100:.1f}% "
         f"(buy & hold {s['buyHoldMaxDrawdown'] * 100:.1f}%).",
         f"- Trading: {s['trades']} trades, win rate {s['winRate'] * 100:.0f}%, "
         f"in the market {s['timeInMarket'] * 100:.0f}% of the time"
-        + (f", beta to the S&P 500 {s['betaToSp500']:.2f}." if s.get("betaToSp500") is not None else "."),
+        + (
+            f", beta to the {s.get('benchmark', 'S&P 500')} {s['betaToSp500']:.2f}."
+            if s.get("betaToSp500") is not None
+            else "."
+        ),
     ]
     if "modelAccuracy" in s:
         lines.append(
@@ -341,7 +366,7 @@ def describe_comparison(symbol: str, rows: list[dict[str, Any]]) -> str:
         )
     lines.append(
         f"Returns include {rows[0]['costPerTradeBps']:g} bps of fees and slippage per trade; "
-        f"the S&P 500 returned {_pct(rows[0]['sp500Return'])} over the same period."
+        f"the {rows[0].get('benchmark', 'S&P 500')} returned {_pct(rows[0]['sp500Return'])} over the same period."
     )
     return "\n".join(lines)
 

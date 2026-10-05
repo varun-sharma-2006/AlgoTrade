@@ -1,10 +1,12 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import type { PortfolioPosition, PortfolioResponse } from "../types";
 import { strategyLabel } from "./StrategyTrainer";
 
 interface PortfolioPageProps {
   onLoad: () => Promise<PortfolioResponse>;
   onOpenSimulations: () => void;
+  /** Today's signals and alert settings, shown under the holdings. */
+  alerts?: ReactNode;
 }
 
 const DONUT_COLORS = ["#e3c27f", "#8fb7ff", "#5fd49a", "#f0a37a", "#c9a4f5", "#7fd6d6", "#f07a9a", "#b8b8b8"];
@@ -12,12 +14,18 @@ const DONUT_COLORS = ["#e3c27f", "#8fb7ff", "#5fd49a", "#f0a37a", "#c9a4f5", "#7
 export const money = (value: number, currency = "USD") =>
   value.toLocaleString(undefined, { style: "currency", currency, maximumFractionDigits: 2 });
 
-const signedMoney = (value: number) => `${value >= 0 ? "+" : "−"}${money(Math.abs(value))}`;
+const signedMoney = (value: number, currency = "USD") => `${value >= 0 ? "+" : "−"}${money(Math.abs(value), currency)}`;
 const signedPct = (value: number) => `${value >= 0 ? "+" : "−"}${Math.abs(value * 100).toFixed(2)}%`;
 const tone = (value: number) => (value > 0 ? "positive" : value < 0 ? "negative" : "");
 
 /** Area chart of portfolio value with min/max labels and a hover read-out. */
-export function ValueChart({ points }: { points: Array<{ date: string; value: number }> }) {
+export function ValueChart({
+  points,
+  currency = "USD",
+}: {
+  points: Array<{ date: string; value: number }>;
+  currency?: string;
+}) {
   const [hover, setHover] = useState<number | null>(null);
   const width = 800;
   const height = 240;
@@ -43,7 +51,7 @@ export function ValueChart({ points }: { points: Array<{ date: string; value: nu
       <div className="value-chart-readout">
         {active ? (
           <>
-            <strong>{money(active.value)}</strong>
+            <strong>{money(active.value, currency)}</strong>
             <span className="subtle">{new Date(active.date).toLocaleDateString(undefined, { dateStyle: "medium" })}</span>
           </>
         ) : (
@@ -60,7 +68,7 @@ export function ValueChart({ points }: { points: Array<{ date: string; value: nu
           setHover(Math.max(0, Math.min(points.length - 1, Math.round(ratio * (points.length - 1)))));
         }}
         role="img"
-        aria-label={`Portfolio value from ${money(values[0])} to ${money(values[values.length - 1])}`}
+        aria-label={`Portfolio value from ${money(values[0], currency)} to ${money(values[values.length - 1], currency)}`}
       >
         <defs>
           <linearGradient id="portfolio-fill" x1="0" y1="0" x2="0" y2="1">
@@ -99,7 +107,7 @@ export function ValueChart({ points }: { points: Array<{ date: string; value: nu
         ))}
       </div>
       <div className="value-chart-range subtle">
-        Low {money(min)} · High {money(max)}
+        Low {money(min, currency)} · High {money(max, currency)}
       </div>
     </div>
   );
@@ -153,13 +161,76 @@ export function AllocationDonut({ allocation }: { allocation: PortfolioResponse[
   );
 }
 
-function PositionRow({ position }: { position: PortfolioPosition }) {
+function Ledger({ position }: { position: PortfolioPosition }) {
+  const ledger = position.ledger ?? [];
+  if (!ledger.length) return <p className="empty">No trades yet: the strategy has stayed in cash.</p>;
+  const local = position.currency || "USD";
+  const fees = ledger.reduce((sum, entry) => sum + entry.fee + entry.slippage, 0);
+  return (
+    <div className="ledger">
+      <table className="trades-table">
+        <thead>
+          <tr>
+            <th>Date</th>
+            <th>Side</th>
+            <th>Shares</th>
+            <th>Price</th>
+            <th>Value</th>
+            <th>Fee</th>
+            <th>Slippage</th>
+          </tr>
+        </thead>
+        <tbody>
+          {[...ledger].reverse().map((entry, index) => (
+            <tr key={`${entry.date}-${index}`}>
+              <td>{new Date(entry.date).toLocaleDateString()}</td>
+              <td className={entry.side === "buy" ? "positive" : "negative"}>
+                {entry.side}
+                {entry.stop ? " (stop)" : ""}
+              </td>
+              <td>{entry.shares.toLocaleString(undefined, { maximumFractionDigits: 4 })}</td>
+              <td>{money(entry.price, local)}</td>
+              <td>{money(entry.notional, local)}</td>
+              <td>{money(entry.fee, local)}</td>
+              <td>{money(entry.slippage, local)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <span className="subtle">
+        {ledger.length} fills · {money(fees, local)} in fees and slippage
+        {position.fxConverted && position.fxReturn !== undefined
+          ? ` · ${local} moved ${signedPct(position.fxReturn)} against ${position.baseCurrency ?? "USD"} since the start`
+          : ""}
+      </span>
+    </div>
+  );
+}
+
+function PositionRow({ position, currency }: { position: PortfolioPosition; currency: string }) {
+  const [open, setOpen] = useState(false);
   const beatHold = position.buyHoldValue !== undefined ? position.value - position.buyHoldValue : null;
   return (
-    <tr>
-      <td>
-        <span className="badge">{position.symbol}</span>
-      </td>
+    <Fragment>
+      <tr>
+        <td>
+          <button
+            type="button"
+            className="button-ghost chip ledger-toggle"
+            aria-expanded={open}
+            aria-label={`${open ? "Hide" : "Show"} ${position.symbol} trades`}
+            onClick={() => setOpen((value) => !value)}
+          >
+            {open ? "▾" : "▸"}
+          </button>
+          <span className="badge">{position.symbol}</span>
+          {position.fxMissing ? (
+            <span className="subtle" title="No exchange rate was available; valued without currency moves">
+              {" "}
+              FX?
+            </span>
+          ) : null}
+        </td>
       <td>
         <div>{position.strategy}</div>
         {/* The strategy type, when the simulation's own name doesn't already say it (e.g. saved custom rules). */}
@@ -171,26 +242,48 @@ function PositionRow({ position }: { position: PortfolioPosition }) {
         {position.error ? (
           <span className="subtle">{position.error}</span>
         ) : (
-          <span className={`status-pill ${position.inMarket ? "live" : "done"}`}>{position.inMarket ? "Invested" : "In cash"}</span>
+          <>
+            <span className={`status-pill ${position.inMarket ? "live" : "done"}`}>{position.inMarket ? "Invested" : "In cash"}</span>
+            {position.pendingOrder ? (
+              <span className="subtle" title="Decided at the last close; fills at the next open">
+                {" "}
+                · {position.pendingOrder} at open
+              </span>
+            ) : null}
+          </>
         )}
       </td>
       <td>{position.startDate ? new Date(position.startDate).toLocaleDateString() : "–"}</td>
-      <td>{money(position.startingCapital)}</td>
+      <td>{money(position.startingCapital, currency)}</td>
       <td>
-        <strong>{money(position.value)}</strong>
+        <strong>{money(position.value, currency)}</strong>
       </td>
       <td className={tone(position.pnl)}>
-        {signedMoney(position.pnl)}
+        {signedMoney(position.pnl, currency)}
         <span className="subtle">{signedPct(position.pnlPct)}</span>
       </td>
       <td className={beatHold === null || position.strategyId === "buy-hold" ? "" : tone(beatHold)}>
-        {position.strategyId === "buy-hold" ? <span className="subtle">Baseline</span> : beatHold === null ? "–" : signedMoney(beatHold)}
+        {position.strategyId === "buy-hold" ? (
+          <span className="subtle">Baseline</span>
+        ) : beatHold === null ? (
+          "–"
+        ) : (
+          signedMoney(beatHold, currency)
+        )}
       </td>
-    </tr>
+      </tr>
+      {open ? (
+        <tr className="ledger-row">
+          <td colSpan={8}>
+            <Ledger position={position} />
+          </td>
+        </tr>
+      ) : null}
+    </Fragment>
   );
 }
 
-export function PortfolioPage({ onLoad, onOpenSimulations }: PortfolioPageProps) {
+export function PortfolioPage({ onLoad, onOpenSimulations, alerts }: PortfolioPageProps) {
   const [data, setData] = useState<PortfolioResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -212,6 +305,7 @@ export function PortfolioPage({ onLoad, onOpenSimulations }: PortfolioPageProps)
   }, [refresh]);
 
   const summary = data?.summary;
+  const currency = summary?.baseCurrency ?? "USD";
   const best = useMemo(
     () => (data?.positions.length ? [...data.positions].sort((a, b) => b.pnlPct - a.pnlPct)[0] : null),
     [data],
@@ -223,7 +317,11 @@ export function PortfolioPage({ onLoad, onOpenSimulations }: PortfolioPageProps)
         <div>
           <span className="eyebrow">Paper portfolio</span>
           <h1>Portfolio</h1>
-          <p>Every simulation, replayed on real prices with its strategy's buy and sell rules, fees included.</p>
+          <p>
+            Every simulation, replayed on real prices with its strategy's buy and sell rules, fees included
+            {summary?.execution === "next_open" ? ", filling orders at the next day's open" : ""}. Values are in {currency};
+            stocks quoted in other currencies include the exchange-rate move.
+          </p>
         </div>
         <button type="button" className="button-ghost" onClick={() => void refresh()} disabled={loading}>
           {loading ? "Updating…" : "Refresh"}
@@ -251,17 +349,17 @@ export function PortfolioPage({ onLoad, onOpenSimulations }: PortfolioPageProps)
           <div className="stats-grid">
             <div className="stat-card">
               <span className="label">Portfolio value</span>
-              <strong className="value">{money(summary.totalValue)}</strong>
-              <span className="subtle">{money(summary.totalCapital)} invested</span>
+              <strong className="value">{money(summary.totalValue, currency)}</strong>
+              <span className="subtle">{money(summary.totalCapital, currency)} invested</span>
             </div>
             <div className="stat-card">
               <span className="label">Total return</span>
-              <strong className={`value plain ${tone(summary.pnl)}`}>{signedMoney(summary.pnl)}</strong>
+              <strong className={`value plain ${tone(summary.pnl)}`}>{signedMoney(summary.pnl, currency)}</strong>
               <span className={`subtle ${tone(summary.pnl)}`}>{signedPct(summary.pnlPct)}</span>
             </div>
             <div className="stat-card">
               <span className="label">Today</span>
-              <strong className={`value plain ${tone(summary.dayChange)}`}>{signedMoney(summary.dayChange)}</strong>
+              <strong className={`value plain ${tone(summary.dayChange)}`}>{signedMoney(summary.dayChange, currency)}</strong>
               <span className={`subtle ${tone(summary.dayChange)}`}>{signedPct(summary.dayChangePct)}</span>
             </div>
           </div>
@@ -272,7 +370,7 @@ export function PortfolioPage({ onLoad, onOpenSimulations }: PortfolioPageProps)
                 <h2>Value over time</h2>
                 <span className="hint">Simulations count at their starting capital until their start date</span>
               </header>
-              <ValueChart points={data.history} />
+              <ValueChart points={data.history} currency={currency} />
             </div>
             <div className="panel">
               <header>
@@ -289,7 +387,10 @@ export function PortfolioPage({ onLoad, onOpenSimulations }: PortfolioPageProps)
           <div className="panel holdings">
             <header>
               <h2>Holdings</h2>
-              <span className="hint">“vs buy &amp; hold” is how much the strategy made or lost compared with holding the stock</span>
+              <span className="hint">
+                “vs buy &amp; hold” is how much the strategy made or lost compared with holding the stock; the arrow shows every
+                fill
+              </span>
             </header>
             <div className="table-scroll">
               <table className="simulation-table">
@@ -307,7 +408,7 @@ export function PortfolioPage({ onLoad, onOpenSimulations }: PortfolioPageProps)
                 </thead>
                 <tbody>
                   {data.positions.map((position) => (
-                    <PositionRow key={position.id} position={position} />
+                    <PositionRow key={position.id} position={position} currency={currency} />
                   ))}
                 </tbody>
               </table>
@@ -315,6 +416,8 @@ export function PortfolioPage({ onLoad, onOpenSimulations }: PortfolioPageProps)
           </div>
         </>
       ) : null}
+
+      {data && data.positions.length ? alerts : null}
 
       {!data && loading ? <p className="empty">Valuing your simulations…</p> : null}
     </section>

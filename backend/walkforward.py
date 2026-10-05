@@ -23,6 +23,7 @@ GRIDS: dict[str, list[dict[str, float]]] = {
     ],
     "mean-reversion": [{"lookback": lb, "deviation": d} for lb in (10, 20, 30) for d in (1.5, 2.0, 2.5)],
     "trend-follow": [{"channel": c} for c in (10, 20, 40, 55)],
+    "regime-switch": [{"erWindow": w, "erThreshold": t} for w in (10, 20, 40) for t in (0.2, 0.3, 0.45)],
     # The model's probabilities don't depend on the threshold, so this grid costs one model run.
     "ml-logistic": [{"threshold": t, "trainWindow": 504} for t in (0.5, 0.52, 0.55, 0.58)],
 }
@@ -38,9 +39,14 @@ def run(
     *,
     train_days: int = TRAIN_DAYS,
     test_days: int = TEST_DAYS,
+    opens: list[float] | None = None,
+    execution: str = "close",
+    sell_cost_bps: float | None = None,
+    allow_short: bool = False,
 ) -> dict[str, Any]:
     grid = GRIDS[strategy_id]
-    targets = [strategies.signals(strategy_id, closes, params)[0] for params in grid]
+    targets = [strategies.signals(strategy_id, closes, params, allow_short=allow_short)[0] for params in grid]
+    trading = {"opens": opens, "execution": execution, "sell_cost_bps": sell_cost_bps}
     warm = max(strategies.warmup(strategy_id, params) for params in grid)
     last = len(closes) - 1
     first_test = warm + train_days
@@ -56,11 +62,13 @@ def run(
         train_start = test_start - train_days
         scored = []
         for k, target in enumerate(targets):
-            trained = strategies.simulate(closes, target, train_start, test_start, cost_bps)
+            trained = strategies.simulate(closes, target, train_start, test_start, cost_bps, **trading)
             stats = risk.summary(trained["dailyReturns"], [1.0, *trained["equity"]])
             scored.append((stats["sharpe"], -k, k, stats))  # ties go to the first (simplest) grid entry
         _, _, best, train_stats = max(scored)
-        tested = strategies.simulate(closes, targets[best], test_start, test_end, cost_bps, held=held, value=value)
+        tested = strategies.simulate(
+            closes, targets[best], test_start, test_end, cost_bps, held=held, value=value, **trading
+        )
         start_value = value
         value, held = tested["equity"][-1], tested["held"]
         folds.append(
@@ -113,6 +121,7 @@ def run(
             "mostChosenParams": dict(chosen.most_common(1)[0][0]),
             "mostChosenCount": chosen.most_common(1)[0][1],
             "costBps": cost_bps,
+            "execution": execution,
         },
         "period": {"start": timestamps[first_test], "end": timestamps[last], "days": last - first_test + 1},
     }

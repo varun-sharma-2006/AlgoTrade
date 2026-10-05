@@ -30,7 +30,20 @@ describe("StrategyTrainer", () => {
     fireEvent.change(screen.getByLabelText("Channel length"), { target: { value: "55" } });
     fireEvent.click(screen.getByRole("button", { name: "Run backtest" }));
 
-    expect(onTrain).toHaveBeenCalledWith({ symbol: "AAPL", strategyId: "trend-follow", channel: 55, slippageBps: 5 });
+    expect(onTrain).toHaveBeenCalledWith({
+      symbol: "AAPL",
+      strategyId: "trend-follow",
+      channel: 55,
+      execution: "next_open",
+      sizing: "full",
+      sizeFraction: 0.5,
+      targetVol: 0.15,
+      maxLeverage: 1,
+      allowShort: false,
+      borrowBps: 50,
+      riskFreeRate: 0.04,
+      slippageBps: 5,
+    });
   });
 
   it("disables the signal button until a strategy is trained", () => {
