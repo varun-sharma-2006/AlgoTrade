@@ -37,6 +37,13 @@ machine-learning strategy that is trained only on the past, and ask the trading 
   ratios annualised correctly for intraday and 24/7 markets.
 - **Market impact**: optional square-root-law costs that grow with order size relative to the stock's traded value,
   and a split of returns into overnight gaps vs the trading session.
+- **Earnings**: earnings dates from SEC EDGAR filings (free). Every US backtest reports how much it earned around
+  earnings announcements, and "Skip earnings" stays out of the market over them.
+- **Survivorship bias**: the S&P 500's membership on any past date, rebuilt from Wikipedia's change history. The
+  Portfolio lab can check a basket for stocks that only joined the index later, or draw a random sample of the
+  index as it was when the backtest starts, including companies that have since left it.
+- **News tone**: an optional machine-learning feature built from GDELT's daily news tone for the company, using only
+  articles published before each decision.
 - **Risk analytics**: total and annualised return, volatility, Sharpe, Sortino, max drawdown and Calmar for the
   strategy, buy & hold and the index side by side (net of a configurable risk-free rate), plus beta, alpha and
   correlation to the index, 1-day VaR and CVaR, profit factor, turnover, win rate, time in market, a growth-of-$1
@@ -98,6 +105,8 @@ machine-learning strategy that is trained only on the past, and ask the trading 
   in plain English, backtest it, walk-forward test it, save it, use it in simulations, and **export it to
   TradingView Pine Script** or a **Jupyter notebook** that reproduces the backtest with pandas.
 - **Price and indicator alerts**: "tell me when NVDA's RSI(14) is below 30", checked after every close.
+- **Push notifications**: trade signals and alerts on your phone or desktop (standard Web Push, no third-party
+  service), alongside email and Telegram.
 - **Exports and app**: trade logs as CSV, a print-friendly PDF layout, and an installable app (PWA).
 - **Sign in with Google**: Google verifies each visitor's email; an admin-only **Visitors** page lists who signed in, when and from which device, with CSV export.
 - **Runs anywhere**: an in-memory mode needs no database; MongoDB is used for persistence.
@@ -168,6 +177,10 @@ backend/
   notebook.py       Jupyter notebook export
   pricecache.py     daily price history cached in MongoDB
   broker.py         Alpaca paper-order mirroring (admins)
+  earnings.py       earnings dates from SEC EDGAR, blackout windows
+  survivorship.py   point-in-time S&P 500 membership (Wikipedia)
+  news.py           GDELT news tone feature
+  push.py           Web Push notifications
   copilot.py        copilot tools for Gemini function calling, and the offline request parser
   rules.py          Strategy Builder rule engine (indicators, AND/OR, long/short, stops, Pine Script export)
   portfolio.py      replays simulations on real prices and totals the portfolio
@@ -275,6 +288,8 @@ override variables already set in your system environment.
 | `HEAVY_REQUESTS_PER_MINUTE` | Research runs (robustness, optimiser, review, baskets...) allowed per user per minute | `20` |
 | `CACHE_PRICES_IN_DB` | Cache daily price history in MongoDB and refresh only the latest month | `true` |
 | `SENTRY_DSN` | Send backend errors to Sentry | unset |
+| `SEC_CONTACT_EMAIL` | Contact email the SEC requires for EDGAR requests; turns on earnings dates | unset (earnings off) |
+| `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, `VAPID_SUBJECT` | Web Push keys (`python -m backend.scripts.vapid_keys` creates a pair) | unset (push off) |
 | `ALPACA_KEY_ID`, `ALPACA_SECRET_KEY`, `ALPACA_BASE_URL` | Alpaca paper-trading keys: admins can mirror a simulation's trades as paper orders | unset, paper API |
 | `STATIC_DIR` | Serve a built frontend (`dist/`) from the API, for single-container deploys | unset |
 | `FRONTEND_ORIGIN` | Allowed CORS origin | `http://localhost:5173` |
@@ -322,6 +337,9 @@ Interactive docs are served at `/docs`. Authenticated routes expect `Authorizati
 | `POST` `GET` | `/reports` | Create a shareable report (server re-runs the backtest) / list mine |
 | `GET` `DELETE` | `/reports/{id}` | Read a report (public) / delete mine |
 | `GET` `POST` `DELETE` | `/alerts/watch` | Price and indicator alerts |
+| `POST` | `/analytics/survivorship` | Which basket symbols were S&P 500 members when the backtest starts |
+| `GET` | `/analytics/sp500-sample` | Random S&P 500 members as of N years ago, including since-removed ones |
+| `GET`, `POST` | `/push/key`, `/push/subscribe`, `/push/unsubscribe` | Web Push notifications |
 | `GET` `PUT` | `/alerts/settings` | Email / Telegram alert preferences |
 | `GET` | `/alerts/signals` | Today's signal for each active simulation |
 | `POST` | `/alerts/test` | Send a test alert |
@@ -374,8 +392,8 @@ on weekdays. Elsewhere, set the repository secret `CRON_SECRET` and variable `AP
 
 ### Known limitations
 
-- **Survivorship bias**: backtests can only use stocks that still trade today, so baskets of today's leaders look
-  better in hindsight than any basket you could have picked at the time.
+- **Survivorship bias**: free price data mostly covers stocks that still trade, so a point-in-time sample can
+  include companies whose prices are missing; they are reported, not silently dropped.
 - Daily bars only: a stop is assumed to fill exactly at its level unless the open gaps through it, and when a day
   touches both a stop and a target the stop is assumed to come first.
 - Prices come from Yahoo Finance's unofficial API (with Stooq as a fallback for US daily history) and are adjusted
@@ -385,7 +403,8 @@ on weekdays. Elsewhere, set the repository secret `CRON_SECRET` and variable `AP
 - Option premiums are modelled (Black-Scholes on realised volatility), not historical quotes.
 - Taxes are estimates: surcharges, state taxes and personal circumstances are not modelled, and tax is subtracted
   at the end rather than paid each year.
-- Earnings dates aren't available from the free data sources; the overnight-gap share of returns is the proxy.
+- Earnings dates come from SEC filings, so they cover US-listed companies only.
+- GDELT limits requests per IP; when it's busy, the news feature is skipped (and the app says so).
 
 ## Testing
 

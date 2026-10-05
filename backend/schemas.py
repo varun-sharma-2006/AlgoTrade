@@ -143,6 +143,10 @@ class TrainingPayload(BaseModel):
     capital: float | None = Field(default=None, gt=0, le=1e10)
     # Add a market-impact cost that grows with order size relative to the stock's traded value.
     marketImpact: bool = False
+    # Stay out of the market over earnings announcements (US stocks; needs SEC_CONTACT_EMAIL).
+    avoidEarnings: bool = False
+    # Machine learning: add a news-tone feature from GDELT.
+    newsFeatures: bool = False
 
 
 TUNABLE_STRATEGY = Literal["sma-crossover", "mean-reversion", "trend-follow", "regime-switch", "ml-logistic", "custom"]
@@ -207,6 +211,17 @@ class OptionsPayload(BaseModel):
     volPremium: float = Field(default=1.1, ge=0.5, le=2.0)  # implied / realised volatility
     costBps: float = Field(default=5.0, ge=0, le=100)  # per option written, on the notional
     riskFreeRate: float | None = Field(default=None, ge=0, le=0.25)
+
+
+class SurvivorshipPayload(BaseModel):
+    symbols: list[str] = Field(default_factory=list, max_length=60)
+    years: int = Field(default=2, ge=1, le=10)  # how far back the backtest starts
+
+
+class PushSubscription(BaseModel):
+    endpoint: str = Field(min_length=10, max_length=1000, pattern=r"^https://")
+    keys: dict[str, str]
+    expirationTime: float | None = None
 
 
 class LeaderboardEntry(BaseModel):

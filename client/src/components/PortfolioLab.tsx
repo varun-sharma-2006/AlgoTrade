@@ -1,11 +1,55 @@
 import { useState, type FormEvent } from "react";
-import type { BasketPayload, BasketResult, CustomStrategy, Rebalance, Weighting } from "../types";
+import type {
+  BasketPayload,
+  BasketResult,
+  CustomStrategy,
+  Rebalance,
+  Sp500Sample,
+  SurvivorshipResult,
+  Weighting,
+} from "../types";
 import { LineChart, MonthlyHeatmap, pct, signedPct } from "./Research";
 import { ParamInput, STRATEGY_FORMS, initialParams, strategyLabel, type BuiltInStrategyId } from "./StrategyTrainer";
 
 interface PortfolioLabProps {
   onRun: (payload: BasketPayload) => Promise<BasketResult>;
   customStrategies?: CustomStrategy[];
+  onSurvivorship?: (symbols: string[]) => Promise<SurvivorshipResult>;
+  onSample?: () => Promise<Sp500Sample>;
+}
+
+/** How today's basket compares with the index's real membership when the backtest starts. */
+function SurvivorshipPanel({ result }: { result: SurvivorshipResult }) {
+  const biased = result.joinedLater.length > 0;
+  return (
+    <div className={`insight-card ${biased ? "warn-card" : ""}`}>
+      <header>
+        <span className="eyebrow">Survivorship check (S&amp;P 500 on {result.asOf})</span>
+        <strong>
+          {biased
+            ? `${result.joinedLater.length} of your stocks weren't in the index yet`
+            : "Every S&P stock here was already in the index"}
+        </strong>
+        <span className="subtle">
+          The index had {result.membersThen} members then; {result.removedSince.length} have left since (
+          {(100 - result.survivorShare * 100).toFixed(0)}%). Backtesting today's members picks the survivors, which flatters
+          any strategy.
+        </span>
+      </header>
+      {biased ? (
+        <p className="subtle">
+          Joined later:{" "}
+          {result.joinedLater.map((j) => `${j.symbol}${j.date ? ` (${j.date})` : ""}`).join(", ")}. Picking them now uses
+          knowledge you wouldn't have had at the start.
+        </p>
+      ) : null}
+      {result.removedSince.length ? (
+        <p className="subtle">
+          Left the index since then (sample): {result.removedSince.slice(0, 15).map((r) => r.symbol).join(", ")}.
+        </p>
+      ) : null}
+    </div>
+  );
 }
 
 const BASKETS: Array<{ name: string; symbols: string[] }> = [
@@ -31,7 +75,9 @@ function parseSymbols(text: string) {
   return Array.from(new Set(text.split(/[\s,;]+/).map((s) => s.trim().toUpperCase()).filter(Boolean)));
 }
 
-export function PortfolioLab({ onRun, customStrategies = [] }: PortfolioLabProps) {
+export function PortfolioLab({ onRun, customStrategies = [], onSurvivorship, onSample }: PortfolioLabProps) {
+  const [survivors, setSurvivors] = useState<SurvivorshipResult | null>(null);
+  const [sampleNote, setSampleNote] = useState<string | null>(null);
   const [symbolsText, setSymbolsText] = useState(BASKETS[0].symbols.join(", "));
   const [strategy, setStrategy] = useState<string>("sma-crossover");
   const [params, setParams] = useState<Record<string, number>>(initialParams);
@@ -98,12 +144,39 @@ export function PortfolioLab({ onRun, customStrategies = [] }: PortfolioLabProps
               key={preset.name}
               type="button"
               className="button-ghost chip"
-              onClick={() => setSymbolsText(preset.symbols.join(", "))}
+              onClick={() => {
+                setSymbolsText(preset.symbols.join(", "));
+                setSampleNote(null);
+              }}
             >
               {preset.name}
             </button>
           ))}
+          {onSample ? (
+            <button
+              type="button"
+              className="button-ghost chip"
+              title="20 random members of the S&P 500 as it was 2 years ago, including companies that have left it since"
+              onClick={() =>
+                void onSample()
+                  .then((sample) => {
+                    setSymbolsText(sample.symbols.join(", "));
+                    setSampleNote(
+                      `Random S&P 500 members as of ${sample.asOf} (out of ${sample.membersThen}). ${
+                        sample.leftSince.length
+                          ? `${sample.leftSince.join(", ")} left the index since; any without price data are reported as missing.`
+                          : "None of these has left the index since."
+                      }`,
+                    );
+                  })
+                  .catch((sampleError) => setError(sampleError instanceof Error ? sampleError.message : "Sample failed."))
+              }
+            >
+              Point-in-time S&amp;P 500 sample
+            </button>
+          ) : null}
         </div>
+        {sampleNote ? <p className="hint">{sampleNote}</p> : null}
         <label>
           <span>Symbols ({symbols.length})</span>
           <textarea rows={2} value={symbolsText} onChange={(event) => setSymbolsText(event.target.value)} />
@@ -174,7 +247,22 @@ export function PortfolioLab({ onRun, customStrategies = [] }: PortfolioLabProps
           <button type="submit" disabled={busy || symbols.length < 2}>
             {busy ? "Running…" : "Run portfolio backtest"}
           </button>
+          {onSurvivorship ? (
+            <button
+              type="button"
+              className="button-ghost"
+              disabled={!symbols.length}
+              onClick={() =>
+                void onSurvivorship(symbols)
+                  .then(setSurvivors)
+                  .catch((checkError) => setError(checkError instanceof Error ? checkError.message : "Check failed."))
+              }
+            >
+              Check survivorship bias
+            </button>
+          ) : null}
         </div>
+        {survivors ? <SurvivorshipPanel result={survivors} /> : null}
       </form>
 
       {result ? <BasketResults result={result} /> : null}

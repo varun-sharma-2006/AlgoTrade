@@ -225,6 +225,13 @@ export function Metrics({ metrics, detailed = true }: { metrics: StrategyMetrics
           hint="Price moves while invested: from one close to the next open (news, earnings) vs open to close"
         />
       ) : null}
+      {typeof metrics.earningsReturn === "number" ? (
+        <MetricRow
+          label={metrics.avoidedEarnings ? "Earnings days (skipped)" : "Earned on earnings days"}
+          value={`${pct(metrics.earningsReturn)} (stock ${pct(metrics.buyHoldEarningsReturn ?? 0)}, ${metrics.earningsDays} days)`}
+          hint="Sum of daily returns on the day of and after each earnings report (SEC filing dates)"
+        />
+      ) : null}
       {typeof metrics.impactCost === "number" ? (
         <MetricRow
           label="Market impact paid"
@@ -306,6 +313,14 @@ export function BacktestResults({ training, description }: { training: TrainingR
       ) : null}
       <Metrics metrics={training.metrics} detailed={!training.buyHold} />
       {training.tax ? <TaxCard tax={training.tax} /> : null}
+      {training.news ? (
+        <p className={`subtle ${training.news.used ? "" : "negative"}`}>
+          {training.news.used
+            ? `News tone feature on: GDELT articles matching ${training.news.detail}.`
+            : `News tone feature off: ${training.news.detail}.`}
+        </p>
+      ) : null}
+      {training.earnings?.reason ? <p className="subtle">Earnings: {training.earnings.reason}.</p> : null}
       {training.monthly?.length ? <MonthlyHeatmap monthly={training.monthly} /> : null}
       {training.model ? <ModelReportCard report={training.model} /> : null}
       {trades.length || training.openTrade ? (
@@ -356,6 +371,8 @@ export interface TradingSettings {
   interval: BarInterval;
   capital: number | null;
   marketImpact: boolean;
+  avoidEarnings: boolean;
+  newsFeatures: boolean;
   execution: ExecutionMode;
   sizing: SizingMode;
   sizeFraction: number;
@@ -371,6 +388,8 @@ export const DEFAULT_TRADING: TradingSettings = {
   interval: "1d",
   capital: null,
   marketImpact: false,
+  avoidEarnings: false,
+  newsFeatures: false,
   execution: "next_open",
   sizing: "full",
   sizeFraction: 0.5,
@@ -387,6 +406,8 @@ export function tradingPayload(settings: TradingSettings) {
     interval: settings.interval,
     ...(settings.capital ? { capital: settings.capital } : {}),
     marketImpact: settings.marketImpact,
+    ...(settings.avoidEarnings ? { avoidEarnings: true } : {}),
+    ...(settings.newsFeatures ? { newsFeatures: true } : {}),
     execution: settings.execution,
     sizing: settings.sizing,
     sizeFraction: settings.sizeFraction,
@@ -406,10 +427,12 @@ export function TradingSettingsFields({
   value,
   onChange,
   shortable = true,
+  machineLearning = false,
 }: {
   value: TradingSettings;
   onChange: (next: TradingSettings) => void;
   shortable?: boolean;
+  machineLearning?: boolean;
 }) {
   const set = <K extends keyof TradingSettings>(key: K, next: TradingSettings[K]) => onChange({ ...value, [key]: next });
   return (
@@ -514,10 +537,20 @@ export function TradingSettingsFields({
         <input type="checkbox" checked={value.marketImpact} onChange={(e) => set("marketImpact", e.target.checked)} />
         <span>Market impact</span>
       </label>
+      <label className="checkbox" title="Stay out of the market the day before and the day of each earnings report (US stocks)">
+        <input type="checkbox" checked={value.avoidEarnings} onChange={(e) => set("avoidEarnings", e.target.checked)} />
+        <span>Skip earnings (US)</span>
+      </label>
       {shortable ? (
         <label className="checkbox">
           <input type="checkbox" checked={value.allowShort} onChange={(e) => set("allowShort", e.target.checked)} />
           <span>Allow short selling</span>
+        </label>
+      ) : null}
+      {machineLearning ? (
+        <label className="checkbox" title="Adds the average tone of news about the company over the previous 7 days (GDELT) as a feature">
+          <input type="checkbox" checked={value.newsFeatures} onChange={(e) => set("newsFeatures", e.target.checked)} />
+          <span>News tone feature</span>
         </label>
       ) : null}
       {shortable && value.allowShort ? (
@@ -708,7 +741,12 @@ export function StrategyTrainer({
             onChange={(next) => setParams((previous) => ({ ...previous, [field.key]: next }))}
           />
         ))}
-        <TradingSettingsFields value={trading} onChange={setTrading} shortable={strategyId !== "buy-hold"} />
+        <TradingSettingsFields
+          value={trading}
+          onChange={setTrading}
+          shortable={strategyId !== "buy-hold"}
+          machineLearning={strategyId === "ml-logistic"}
+        />
         <div className="actions">
           <button type="submit" disabled={loading}>
             {loading ? "Training..." : "Run backtest"}

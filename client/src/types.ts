@@ -264,6 +264,10 @@ export interface StrategyMetrics {
   intradayReturn?: number | null;
   impactCost?: number | null;
   maxParticipation?: number | null;
+  earningsReturn?: number | null;
+  buyHoldEarningsReturn?: number | null;
+  earningsDays?: number | null;
+  avoidedEarnings?: boolean;
 }
 
 export type ExecutionMode = "close" | "next_open";
@@ -321,6 +325,8 @@ export interface TrainingPayload {
   interval?: BarInterval;
   capital?: number;
   marketImpact?: boolean;
+  avoidEarnings?: boolean;
+  newsFeatures?: boolean;
 }
 
 export type BarInterval = "1d" | "1h";
@@ -361,6 +367,8 @@ export interface TrainingResult {
   currency?: string;
   interval?: BarInterval;
   tax?: TaxReport;
+  earnings?: { available: boolean; recent?: string[]; reason?: string };
+  news?: { used: boolean; detail: string | null };
   monthly?: MonthlyReturn[];
   trades: BacktestTrade[];
   openTrade: BacktestTrade | null;
@@ -591,7 +599,7 @@ export interface AlertSettings {
 
 export interface AlertSettingsResponse {
   settings: AlertSettings;
-  available: { email: boolean; telegram: boolean; broker?: boolean };
+  available: { email: boolean; telegram: boolean; broker?: boolean; push?: boolean };
 }
 
 export interface DailySignal {
@@ -890,4 +898,21 @@ export interface WatchAlert {
     currency: string;
     description: string;
   } | null;
+}
+
+export interface SurvivorshipResult {
+  asOf: string;
+  membersThen: number;
+  inIndexThen: string[];
+  joinedLater: Array<{ symbol: string; date: string | null }>;
+  notInIndex: string[];
+  removedSince: Array<{ symbol: string; date: string }>;
+  survivorShare: number;
+}
+
+export interface Sp500Sample {
+  asOf: string;
+  symbols: string[];
+  leftSince: string[];
+  membersThen: number;
 }

@@ -561,8 +561,13 @@ def backtest(
     market_closes: Series | None = None,
     periods: float = 252,
     impact: dict[str, Any] | None = None,
+    blackout: set[int] | None = None,
+    reaction_bars: set[int] | None = None,
 ) -> dict[str, Any]:
     """Backtest bars start..end. Bars before `start` only warm up indicators; the money starts in cash.
+
+    `blackout` bars are forced flat at the close (e.g. the day before and the day of earnings), and
+    `reaction_bars` are the bars whose return is attributed to earnings in the metrics.
 
     `periods` is the number of bars in a year (252 for daily stock data). `impact` turns on market-impact
     costs: {"capital": starting capital in the stock's currency, "coefficient": 0.5}.
@@ -580,6 +585,8 @@ def backtest(
         market_closes=market_closes,
     )
     sizing = sizing or {}
+    if blackout:
+        planned["target"] = [0 if i in blackout else t for i, t in enumerate(planned["target"])]
     sized = size_positions(
         planned["target"],
         closes,
@@ -631,8 +638,16 @@ def backtest(
     wins = [r for r in trade_returns if r > 0]
     days = max(last - start, 1)
     window = sized[start : last + 1]
+    earnings_return = hold_earnings = None
+    if reaction_bars is not None:
+        bars_in = [i for i in reaction_bars if start < i <= last]
+        earnings_return = sum(run["dailyReturns"][i - start - 1] for i in bars_in)
+        hold_earnings = sum(closes[i] / closes[i - 1] - 1 for i in bars_in)
     metrics = {
         **stats,
+        # Sum of the strategy's (and the stock's) daily returns on earnings-reaction days.
+        "earningsReturn": earnings_return,
+        "buyHoldEarningsReturn": hold_earnings,
         **risk.tail_risk(run["dailyReturns"]),
         "buyHoldReturn": buy_hold["totalReturn"],
         "excessReturn": stats["totalReturn"] - buy_hold["totalReturn"],
@@ -652,6 +667,10 @@ def backtest(
         "overnightReturn": run["overnight"] if opens is not None else None,
         "intradayReturn": run["intraday"] if opens is not None else None,
         "impactCost": run["impactCost"] if impact else None,
+        "earningsDays": len([i for i in reaction_bars or () if start < i <= last])
+        if reaction_bars is not None
+        else None,
+        "avoidedEarnings": bool(blackout),
         "maxParticipation": run["maxParticipation"] if impact else None,
         "feeBps": fee_bps,
         "sellFeeBps": fee_bps if sell_fee_bps is None else sell_fee_bps,

@@ -1,6 +1,6 @@
 // Service worker for the installable app. Pages are network-first (so deploys show up immediately) with the
 // cached app shell as an offline fallback; hashed build assets are cache-first; API calls are never cached.
-const CACHE = "algo-trade-v1";
+const CACHE = "algo-trade-v2";
 const SHELL = ["/", "/index.html", "/manifest.webmanifest", "/icon-192.png", "/icon-512.png"];
 
 self.addEventListener("install", (event) => {
@@ -39,4 +39,33 @@ self.addEventListener("fetch", (event) => {
       ),
     );
   }
+});
+
+// Web Push: show trade signals and alerts sent by the daily job, and open the app when one is tapped.
+self.addEventListener("push", (event) => {
+  let data = { title: "Algo Trade", body: "You have a new trade signal.", url: "/" };
+  try {
+    data = { ...data, ...(event.data ? event.data.json() : {}) };
+  } catch {
+    data.body = event.data ? event.data.text() : data.body;
+  }
+  event.waitUntil(
+    self.registration.showNotification(data.title, {
+      body: data.body,
+      icon: "/icon-192.png",
+      badge: "/icon-192.png",
+      data: { url: data.url || "/" },
+    }),
+  );
+});
+
+self.addEventListener("notificationclick", (event) => {
+  event.notification.close();
+  const target = (event.notification.data && event.notification.data.url) || "/";
+  event.waitUntil(
+    self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((windows) => {
+      const open = windows.find((w) => new URL(w.url).origin === self.location.origin);
+      return open ? open.focus() : self.clients.openWindow(target);
+    }),
+  );
 });

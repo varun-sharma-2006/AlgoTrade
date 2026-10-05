@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 import type { AlertSettings, AlertSettingsResponse, Condition, ConditionOp, DailySignal, WatchAlert } from "../types";
+import { PushToggle, type PushApi } from "./PushToggle";
 import { OPS, OperandPicker } from "./StrategyBuilder";
 
 interface AlertsPanelProps {
@@ -14,6 +15,7 @@ interface AlertsPanelProps {
   };
   /** Admins with Alpaca configured: mirror a simulation's trades as paper orders. */
   onToggleMirror?: (simulationId: string, enabled: boolean) => Promise<unknown>;
+  push?: PushApi;
 }
 
 const fmt = (value: number | null | undefined) =>
@@ -118,6 +120,7 @@ export function AlertsPanel({
   onTest,
   watch,
   onToggleMirror,
+  push,
 }: AlertsPanelProps) {
   const [signals, setSignals] = useState<DailySignal[] | null>(null);
   const [config, setConfig] = useState<AlertSettingsResponse | null>(null);
@@ -226,6 +229,7 @@ export function AlertsPanel({
           <h2>Trade alerts</h2>
           <span className="hint">Sent once per signal after each market close</span>
         </header>
+        {push ? <PushToggle api={push} /> : null}
         <label className="checkbox">
           <input type="checkbox" checked={email} onChange={(event) => setEmail(event.target.checked)} />
           <span>Email me when a strategy signals a trade</span>

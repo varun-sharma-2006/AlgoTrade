@@ -87,6 +87,12 @@ class Settings(BaseModel):
     )
     # Cache daily price history in MongoDB (when MongoDB is used), refreshing only the latest days.
     cache_prices_in_db: bool = Field(default_factory=lambda: env_flag("CACHE_PRICES_IN_DB", "true"))
+    # Contact email the SEC requires in requests for EDGAR data (earnings dates). Without it, earnings features are off.
+    sec_contact_email: str = Field(default_factory=lambda: os.getenv("SEC_CONTACT_EMAIL", "").strip())
+    # Web Push notifications (VAPID keys; generate with backend/scripts/vapid_keys.py).
+    vapid_public_key: str = Field(default_factory=lambda: os.getenv("VAPID_PUBLIC_KEY", "").strip())
+    vapid_private_key: str = Field(default_factory=lambda: os.getenv("VAPID_PRIVATE_KEY", "").strip())
+    vapid_subject: str = Field(default_factory=lambda: os.getenv("VAPID_SUBJECT", "https://algo-trade-mu.vercel.app"))
     # The site's public address (e.g. https://algo-trade-mu.vercel.app), for share-link previews.
     public_url: str = Field(default_factory=lambda: os.getenv("PUBLIC_URL", "").strip())
     # Built frontend (npm run build -> dist/) to serve from the API, for single-container deploys.

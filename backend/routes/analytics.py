@@ -7,7 +7,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
 
-from backend import basket, costs, factors, ml, risk, robustness, strategies, tax, walkforward
+from backend import basket, costs, earnings, factors, ml, news, risk, robustness, strategies, tax, walkforward
 from backend import rules as rule_engine
 from backend.config import logger, settings
 from backend.deps import get_current_user, get_db, heavy_limit
@@ -49,6 +49,8 @@ def trading_options(payload: TrainingPayload | None = None) -> dict[str, Any]:
             "interval": "1d",
             "capital": None,
             "impact": False,
+            "avoidEarnings": False,
+            "news": False,
         }
     return {
         "execution": payload.execution or settings.execution,
@@ -65,6 +67,8 @@ def trading_options(payload: TrainingPayload | None = None) -> dict[str, Any]:
         "interval": payload.interval,
         "capital": payload.capital,
         "impact": payload.marketImpact,
+        "avoidEarnings": payload.avoidEarnings,
+        "news": payload.newsFeatures,
     }
 
 
@@ -188,6 +192,23 @@ def backtest_on(
     currency = data.get("currency") or "USD"
     capital = options.get("capital") or default_capital(currency)
     periods = strategies.bars_per_year(timestamps, symbol)
+    blackout = reaction = None
+    earnings_info: dict[str, Any] = {"available": False}
+    if costs.market(symbol) == "US" and data.get("interval", "1d") == "1d":
+        dates = earnings.earnings_dates(symbol)
+        if dates:
+            blackout, reaction = earnings.windows(timestamps, dates, options.get("execution") == "next_open")
+            earnings_info = {"available": True, "recent": [d for d in dates if d >= timestamps[start][:10]][-12:]}
+        elif not earnings.enabled():
+            earnings_info["reason"] = "Earnings dates need SEC_CONTACT_EMAIL on the server"
+    if options.get("avoidEarnings") and not blackout:
+        earnings_info["reason"] = earnings_info.get("reason") or "No earnings dates for this symbol (US stocks only)"
+    news_info: dict[str, Any] | None = None
+    if strategy_id == "ml-logistic" and options.get("news") and bars is not None:
+        series, detail = news.tone_feature(symbol, timestamps)
+        news_info = {"used": series is not None, "detail": detail}
+        if series is not None:
+            bars = {**bars, "news": series}
     report = strategies.backtest(
         closes,
         timestamps,
@@ -209,7 +230,12 @@ def backtest_on(
         market_closes=market,
         periods=periods,
         impact={"capital": capital} if options.get("impact") else None,
+        blackout=blackout if options.get("avoidEarnings") else None,
+        reaction_bars=reaction,
     )
+    report["earnings"] = earnings_info
+    if news_info is not None:
+        report["news"] = news_info
     if strategy_id == "ml-logistic":
         report["model"] = ml.report(closes, params, start, cost_bps=cost["buyBps"], bars=bars, market=market)
     region, crypto = costs.tax_region(symbol, settings.base_currency)
