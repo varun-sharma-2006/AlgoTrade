@@ -8,7 +8,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
 
-from backend import costs, nlrules, notebook, options, review, robustness, sip, strategies, walkforward
+from backend import costs, nlrules, notebook, options, review, robustness, sip, strategies, survivorship, walkforward
 from backend import rules as rule_engine
 from backend.config import settings
 from backend.deps import get_current_user, heavy_limit
@@ -29,6 +29,7 @@ from backend.schemas import (
     OptionsPayload,
     RobustnessPayload,
     SipPayload,
+    SurvivorshipPayload,
     TextRulesPayload,
     TrainingPayload,
 )
@@ -360,3 +361,33 @@ async def export_notebook(payload: TrainingPayload) -> dict[str, Any]:
         backtest_days=strategies.period_days(settings.backtest_period),
         summary=summary,
     )
+
+
+# ---------- Survivorship bias ----------
+
+
+def _years_ago(years: int) -> str:
+    from datetime import date, timedelta
+
+    return (date.today() - timedelta(days=round(365.25 * years))).isoformat()
+
+
+@router.post("/analytics/survivorship", dependencies=[Depends(get_current_user)])
+async def survivorship_check(payload: SurvivorshipPayload) -> dict[str, Any]:
+    """Which of these symbols were S&P 500 members when the backtest starts, and who has left since."""
+    symbols = [s.strip().upper() for s in payload.symbols if s.strip()]
+    result = await asyncio.to_thread(survivorship.check, symbols, _years_ago(payload.years))
+    if result is None:
+        raise HTTPException(status_code=502, detail="S&P 500 history is unavailable right now")
+    return result
+
+
+@router.get("/analytics/sp500-sample", dependencies=[Depends(get_current_user)])
+async def sp500_sample(size: int = 20, years: int = 2, seed: int | None = None) -> dict[str, Any]:
+    """A random sample of the S&P 500 as it was `years` ago, including companies that have since left it."""
+    result = await asyncio.to_thread(
+        survivorship.sample, _years_ago(max(1, min(years, 10))), max(2, min(size, 30)), seed
+    )
+    if result is None:
+        raise HTTPException(status_code=502, detail="S&P 500 history is unavailable right now")
+    return result

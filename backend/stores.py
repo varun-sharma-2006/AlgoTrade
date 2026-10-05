@@ -111,6 +111,7 @@ MAX_CUSTOM_STRATEGIES = 20
 DEFAULT_ALERTS: dict[str, Any] = {"email": False, "telegramChatId": None}
 MAX_REPORTS = 50
 MAX_WATCH_ALERTS = 20
+MAX_PUSH_DEVICES = 5
 
 
 def _first_name(user: dict[str, Any]) -> str:
@@ -382,6 +383,29 @@ class MongoStore:
     async def mark_watch_alert(self, alert_id: str, key: str) -> None:
         await self.db.watch_alerts.update_one({"_id": _object_id(alert_id)}, {"$set": {"lastAlert": key}})
 
+    # Web Push subscriptions
+    async def add_push_subscription(self, user_id: str, subscription: dict[str, Any]) -> None:
+        await self.db.push_subscriptions.update_one(
+            {"endpoint": subscription["endpoint"]},
+            {"$set": {"userId": ObjectId(user_id), "subscription": subscription, "createdAt": now()}},
+            upsert=True,
+        )
+        cursor = (
+            self.db.push_subscriptions.find({"userId": ObjectId(user_id)}).sort("createdAt", -1).skip(MAX_PUSH_DEVICES)
+        )
+        for old in await cursor.to_list(length=100):
+            await self.db.push_subscriptions.delete_one({"_id": old["_id"]})
+
+    async def list_push_subscriptions(self, user_id: str) -> list[dict[str, Any]]:
+        cursor = self.db.push_subscriptions.find({"userId": ObjectId(user_id)})
+        return [doc["subscription"] for doc in await cursor.to_list(length=MAX_PUSH_DEVICES)]
+
+    async def remove_push_subscription(self, endpoint: str, user_id: str | None = None) -> None:
+        query: dict[str, Any] = {"endpoint": endpoint}
+        if user_id:
+            query["userId"] = ObjectId(user_id)
+        await self.db.push_subscriptions.delete_one(query)
+
 
 class InMemoryStore:
     """Ephemeral store for local development and demos (USE_IN_MEMORY_DB=true). Data resets on restart.
@@ -402,6 +426,7 @@ class InMemoryStore:
         self.alerts: dict[str, dict[str, Any]] = {}
         self.reports: dict[str, dict[str, Any]] = {}
         self.watch_alerts: dict[str, dict[str, Any]] = {}
+        self.push_subscriptions: dict[str, dict[str, Any]] = {}
 
     async def close(self) -> None:
         return None
@@ -642,6 +667,31 @@ class InMemoryStore:
         async with self.lock:
             if alert_id in self.watch_alerts:
                 self.watch_alerts[alert_id]["lastAlert"] = key
+
+    async def add_push_subscription(self, user_id: str, subscription: dict[str, Any]) -> None:
+        async with self.lock:
+            self.push_subscriptions[subscription["endpoint"]] = {
+                "userId": user_id,
+                "subscription": subscription,
+                "createdAt": now().isoformat(),
+            }
+            mine = sorted(
+                (k for k, v in self.push_subscriptions.items() if v["userId"] == user_id),
+                key=lambda k: self.push_subscriptions[k]["createdAt"],
+                reverse=True,
+            )
+            for endpoint in mine[MAX_PUSH_DEVICES:]:
+                self.push_subscriptions.pop(endpoint, None)
+
+    async def list_push_subscriptions(self, user_id: str) -> list[dict[str, Any]]:
+        async with self.lock:
+            return [v["subscription"] for v in self.push_subscriptions.values() if v["userId"] == user_id]
+
+    async def remove_push_subscription(self, endpoint: str, user_id: str | None = None) -> None:
+        async with self.lock:
+            record = self.push_subscriptions.get(endpoint)
+            if record and (user_id is None or record["userId"] == user_id):
+                self.push_subscriptions.pop(endpoint, None)
 
 
 Store = MongoStore | InMemoryStore

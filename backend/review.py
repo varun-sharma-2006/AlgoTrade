@@ -107,6 +107,16 @@ def findings(
                 "open, which includes earnings and news gaps you can't react to.",
             )
 
+    earned = m.get("earningsReturn")
+    total = m.get("totalReturn")
+    if earned is not None and total is not None and total > 0.02 and earned > 0.5 * total:
+        add(
+            WARN,
+            "Profits depend on earnings days",
+            f"About {_pct(earned)} of the return came on the {m.get('earningsDays') or 'few'} days around earnings "
+            "announcements. Try the 'skip earnings' option to see the strategy without them.",
+        )
+
     participation = m.get("maxParticipation")
     if participation is not None and participation > 0.01:
         add(

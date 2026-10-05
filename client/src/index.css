@@ -3286,3 +3286,15 @@ a.link-button:hover {
     color: #000;
   }
 }
+
+/* ---------- Round 3: survivorship, push ---------- */
+
+.insight-card.warn-card {
+  border-color: rgba(240, 122, 122, 0.45);
+}
+
+.push-toggle {
+  display: grid;
+  gap: 0.4rem;
+  justify-items: start;
+}

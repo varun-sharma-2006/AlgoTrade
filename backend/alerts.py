@@ -19,7 +19,7 @@ from typing import Any
 
 import requests
 
-from backend import broker, strategies
+from backend import broker, push, strategies
 from backend import rules as rule_engine
 from backend.config import logger, settings
 
@@ -151,13 +151,37 @@ def send_telegram(chat_id: str, text: str) -> bool:
         return False
 
 
-def deliver(user: dict[str, Any], prefs: dict[str, Any], items: list[dict[str, Any]]) -> dict[str, bool]:
+def push_text(items: list[dict[str, Any]]) -> tuple[str, str]:
+    """A short title and body for a phone notification."""
+    first = items[0]
+    if len(items) == 1:
+        title = (
+            f"{first['signal'].upper()} {first['symbol']}"
+            if first.get("kind") != "watch"
+            else f"Alert: {first['symbol']}"
+        )
+        return title, first["summary"]
+    return f"{len(items)} trade signals", ", ".join(f"{i['signal'].upper()} {i['symbol']}" for i in items[:6])
+
+
+def deliver(
+    user: dict[str, Any],
+    prefs: dict[str, Any],
+    items: list[dict[str, Any]],
+    subscriptions: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
     subject, body = compose(user.get("name", ""), items)
-    sent = {"email": False, "telegram": False}
+    sent: dict[str, Any] = {"email": False, "telegram": False, "push": False, "gone": []}
     if prefs.get("email") and user.get("email"):
         sent["email"] = send_email(user["email"], subject, body)
     if prefs.get("telegramChatId"):
         sent["telegram"] = send_telegram(prefs["telegramChatId"], f"{subject}\n\n{body}")
+    title, text = push_text(items)
+    for subscription in subscriptions or []:
+        outcome = push.send(subscription, title, text, "/")
+        sent["push"] = sent["push"] or outcome == "sent"
+        if outcome == "gone":
+            sent["gone"].append(subscription["endpoint"])
     return sent
 
 
@@ -199,9 +223,12 @@ async def run_daily(store: Any, load_chart: ChartLoader) -> dict[str, Any]:
     for user_id, items in by_user.items():
         user = await store.get_user(user_id)
         prefs = await store.get_alert_settings(user_id)
-        if user and (prefs.get("email") or prefs.get("telegramChatId")):
-            sent = await asyncio.to_thread(deliver, user, prefs, items)
-            delivered += int(any(sent.values()))
+        subscriptions = await store.list_push_subscriptions(user_id)
+        if user and (prefs.get("email") or prefs.get("telegramChatId") or subscriptions):
+            sent = await asyncio.to_thread(deliver, user, prefs, items, subscriptions)
+            for endpoint in sent["gone"]:
+                await store.remove_push_subscription(endpoint)
+            delivered += int(sent["email"] or sent["telegram"] or sent["push"])
         # Marked even without a channel, so turning alerts on later doesn't replay old signals.
         for item in items:
             if item.get("kind") == "watch":

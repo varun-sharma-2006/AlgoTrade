@@ -41,6 +41,11 @@ import {
   fetchWatchAlerts,
   addWatchAlert,
   deleteWatchAlert,
+  checkSurvivorship,
+  fetchSp500Sample,
+  fetchPushKey,
+  subscribePush,
+  unsubscribePush,
   updateSimulation,
   askChat,
   type AuthResponse,
@@ -652,6 +657,16 @@ export default function App() {
     }),
     [token],
   );
+  const handleSurvivorship = useCallback((symbols: string[]) => checkSurvivorship(token ?? "", symbols), [token]);
+  const handleSample = useCallback(() => fetchSp500Sample(token ?? ""), [token]);
+  const pushApi = useMemo(
+    () => ({
+      getKey: fetchPushKey,
+      subscribe: (subscription: PushSubscriptionJSON) => subscribePush(token ?? "", subscription),
+      unsubscribe: (subscription: PushSubscriptionJSON) => unsubscribePush(token ?? "", subscription),
+    }),
+    [token],
+  );
   const handleToggleMirror = useCallback(
     (simulationId: string, enabled: boolean) => updateSimulation(token ?? "", simulationId, { brokerMirror: enabled }),
     [token],
@@ -858,12 +873,20 @@ export default function App() {
                 onTest={handleTestAlert}
                 watch={watchAlerts}
                 onToggleMirror={handleToggleMirror}
+                push={pushApi}
               />
             }
           />
         );
       case "lab":
-        return <PortfolioLab onRun={handleBasket} customStrategies={customStrategies} />;
+        return (
+          <PortfolioLab
+            onRun={handleBasket}
+            customStrategies={customStrategies}
+            onSurvivorship={handleSurvivorship}
+            onSample={handleSample}
+          />
+        );
       case "leaderboard":
         return <Leaderboard onRun={handleLeaderboard} customStrategies={customStrategies} />;
       case "sip":

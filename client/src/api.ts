@@ -41,6 +41,8 @@ import type {
   TextRulesResult,
   WatchAlert,
   Condition,
+  SurvivorshipResult,
+  Sp500Sample,
 } from "./types";
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
@@ -360,4 +362,24 @@ export function downloadFile(name: string, contents: string, type = "application
   link.click();
   link.remove();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+export function checkSurvivorship(token: string, symbols: string[], years = 2) {
+  return request<SurvivorshipResult>("/analytics/survivorship", { method: "POST", body: { symbols, years }, token });
+}
+
+export function fetchSp500Sample(token: string, size = 20, years = 2) {
+  return request<Sp500Sample>(`/analytics/sp500-sample?size=${size}&years=${years}`, { token });
+}
+
+export function fetchPushKey() {
+  return request<{ publicKey: string | null; available: boolean }>("/push/key");
+}
+
+export function subscribePush(token: string, subscription: PushSubscriptionJSON) {
+  return request<{ subscribed: boolean; devices: number }>("/push/subscribe", { method: "POST", body: subscription, token });
+}
+
+export function unsubscribePush(token: string, subscription: PushSubscriptionJSON) {
+  return request<{ subscribed: boolean }>("/push/unsubscribe", { method: "POST", body: subscription, token });
 }

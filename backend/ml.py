@@ -43,6 +43,7 @@ FEATURES = BASE_FEATURES  # kept for callers that list the price-only features
 VOLUME_FEATURE = ("volRatio", "Volume vs 20-day average")
 RANGE_FEATURE = ("atr14", "Average true range / price (14)")
 MARKET_FEATURES = [("mkt20", "Market 20-day return"), ("mktVol20", "Market 20-day volatility")]
+NEWS_FEATURE = ("news7", "News tone, previous 7 days (GDELT)")
 
 FEATURE_WARMUP = 51  # the 50-day average and 20-day return volatility need this many closes
 MIN_TRAIN = 252  # at least a year of labelled days before the first prediction
@@ -115,6 +116,11 @@ def feature_table(
         names.extend(MARKET_FEATURES)
     else:
         market = None
+    news = bars.get("news")
+    if news is not None and (len(news) != n or sum(1 for v in news if v is not None) < n // 3):
+        news = None
+    if news is not None:
+        names.append(NEWS_FEATURE)
 
     rows: list[list[float] | None] = []
     for i in range(n):
@@ -140,6 +146,8 @@ def feature_table(
             now, then = market[i], market[i - 20]
             row.append(now / then - 1 if now and then else 0.0)
             row.append(market_vol[i] or 0.0)
+        if news is not None:
+            row.append(news[i] if news[i] is not None else 0.0)
         rows.append(row)
     return rows, names
 
@@ -279,9 +287,9 @@ def predict(model: dict[str, Any], row: list[float]) -> float:
 
 def _extra_key(bars: dict[str, list[Any]] | None, market: Series | None) -> tuple:
     bars = bars or {}
-    return tuple(hash(tuple(bars[k])) if bars.get(k) is not None else None for k in ("volume", "high", "low")) + (
-        hash(tuple(market)) if market is not None else None,
-    )
+    return tuple(
+        hash(tuple(bars[k])) if bars.get(k) is not None else None for k in ("volume", "high", "low", "news")
+    ) + (hash(tuple(market)) if market is not None else None,)
 
 
 def probabilities(

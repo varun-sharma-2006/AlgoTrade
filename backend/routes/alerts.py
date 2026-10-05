@@ -7,10 +7,11 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Response, status
 
-from backend import alerts, broker
+from backend import alerts, broker, push
+from backend.config import settings
 from backend.deps import get_current_user, get_db, is_admin
 from backend.routes.portfolio import _chart
-from backend.schemas import AlertSettings, WatchAlertInput
+from backend.schemas import AlertSettings, PushSubscription, WatchAlertInput
 from backend.stores import Store
 
 router = APIRouter(tags=["alerts"])
@@ -22,6 +23,7 @@ def _channels(user: dict[str, Any]) -> dict[str, bool]:
         "telegram": alerts.telegram_configured(),
         # Admins can mirror simulations as Alpaca paper orders when the server has Alpaca keys.
         "broker": broker.configured() and is_admin(user),
+        "push": push.configured(),
     }
 
 
@@ -87,8 +89,11 @@ async def test_alert(
     user: dict[str, Any] = Depends(get_current_user), store: Store = Depends(get_db)
 ) -> dict[str, Any]:
     prefs = await store.get_alert_settings(user["id"])
-    if not (prefs.get("email") or prefs.get("telegramChatId")):
-        raise HTTPException(status_code=422, detail="Turn on email alerts or add a Telegram chat id first")
+    subscriptions = await store.list_push_subscriptions(user["id"])
+    if not (prefs.get("email") or prefs.get("telegramChatId") or subscriptions):
+        raise HTTPException(
+            status_code=422, detail="Turn on email or push notifications, or add a Telegram chat id first"
+        )
     sample = {
         "simulationId": "test",
         "symbol": "TEST",
@@ -99,10 +104,36 @@ async def test_alert(
         "price": 100.0,
         "currency": "USD",
     }
-    sent = await asyncio.to_thread(alerts.deliver, user, prefs, [sample])
+    sent = await asyncio.to_thread(alerts.deliver, user, prefs, [sample], subscriptions)
+    for endpoint in sent.pop("gone"):
+        await store.remove_push_subscription(endpoint)
     if not any(sent.values()):
         raise HTTPException(status_code=503, detail="No alert channel is configured on the server, or sending failed")
     return {"sent": sent}
+
+
+@router.get("/push/key")
+async def push_key() -> dict[str, Any]:
+    """The server's public VAPID key, which browsers need to subscribe to push notifications."""
+    return {"publicKey": settings.vapid_public_key or None, "available": push.configured()}
+
+
+@router.post("/push/subscribe")
+async def push_subscribe(
+    payload: PushSubscription, user: dict[str, Any] = Depends(get_current_user), store: Store = Depends(get_db)
+) -> dict[str, Any]:
+    if not push.configured():
+        raise HTTPException(status_code=503, detail="Push notifications aren't configured on this server")
+    await store.add_push_subscription(user["id"], payload.model_dump(exclude_none=True))
+    return {"subscribed": True, "devices": len(await store.list_push_subscriptions(user["id"]))}
+
+
+@router.post("/push/unsubscribe")
+async def push_unsubscribe(
+    payload: PushSubscription, user: dict[str, Any] = Depends(get_current_user), store: Store = Depends(get_db)
+) -> dict[str, Any]:
+    await store.remove_push_subscription(payload.endpoint, user["id"])
+    return {"subscribed": False}
 
 
 @router.get("/alerts/signals")
@@ -121,8 +152,6 @@ async def todays_signals(
 
 
 async def _run_cron(authorization: str, store: Store) -> dict[str, Any]:
-    from backend.config import settings
-
     if not settings.cron_secret:
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="CRON_SECRET is not set")
     if not hmac.compare_digest(authorization, f"Bearer {settings.cron_secret}"):
