@@ -34,6 +34,8 @@ describe("StrategyTrainer", () => {
       symbol: "AAPL",
       strategyId: "trend-follow",
       channel: 55,
+      interval: "1d",
+      marketImpact: false,
       execution: "next_open",
       sizing: "full",
       sizeFraction: 0.5,

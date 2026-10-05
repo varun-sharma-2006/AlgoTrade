@@ -101,6 +101,34 @@ export const LabIcon = (p: IconProps) => (
   </Icon>
 );
 
+export const TrophyIcon = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M8 4h8v5a4 4 0 0 1-8 0Z" />
+    <path d="M8 6H5a3 3 0 0 0 3 4M16 6h3a3 3 0 0 1-3 4M12 13v4M8.5 20h7M10 17h4" />
+  </Icon>
+);
+
+export const SipIcon = (p: IconProps) => (
+  <Icon {...p}>
+    <rect x="4" y="5" width="16" height="15" rx="2" />
+    <path d="M4 10h16M9 3v4M15 3v4M8.5 14.5l2 2 4-4" />
+  </Icon>
+);
+
+export const OptionsIcon = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M3 17h7l8-10h3" />
+    <path d="M3 7h4M14 17h7" />
+  </Icon>
+);
+
+export const LearnIcon = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M2.5 9 12 4.5 21.5 9 12 13.5Z" />
+    <path d="M6.5 11v4.5c1.5 1.4 3.4 2 5.5 2s4-.6 5.5-2V11M21.5 9v5" />
+  </Icon>
+);
+
 export const VisitorsIcon = (p: IconProps) => (
   <Icon {...p}>
     <circle cx="9" cy="8" r="3.5" />

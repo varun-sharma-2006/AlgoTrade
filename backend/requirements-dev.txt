@@ -4,3 +4,4 @@ pytest-asyncio==1.4.0
 httpx==0.28.1
 mongomock-motor==0.0.36
 ruff==0.16.9
+pandas>=2.2

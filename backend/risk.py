@@ -1,7 +1,8 @@
 """Risk statistics for daily return series, and comparison against a benchmark index.
 
-All ratios are annualised with 252 trading days. Sharpe, Sortino and alpha subtract a risk-free rate
-(annual, 0 by default), spread evenly over the trading days.
+All ratios are annualised with `periods` bars a year: 252 for daily stock data by default, 365 for crypto
+(which trades every day), and bars-per-day times that for hourly data. Sharpe, Sortino and alpha subtract a
+risk-free rate (annual, 0 by default), spread evenly over the periods.
 """
 
 from __future__ import annotations
@@ -36,15 +37,18 @@ def drawdowns(equity: list[float]) -> list[float]:
     return result
 
 
-def annualise(total_return: float, periods: int) -> float:
+def annualise(total_return: float, bars: int, periods: float = TRADING_DAYS) -> float:
+    """Compound annual growth for a return earned over `bars` bars, with `periods` bars a year."""
     if total_return <= -1:
         return -1.0
-    return (1 + total_return) ** (TRADING_DAYS / max(periods, 1)) - 1
+    return (1 + total_return) ** (periods / max(bars, 1)) - 1
 
 
-def summary(daily_returns: list[float], equity: list[float], risk_free: float = 0.0) -> dict[str, float]:
+def summary(
+    daily_returns: list[float], equity: list[float], risk_free: float = 0.0, periods: float = TRADING_DAYS
+) -> dict[str, float]:
     """Return, volatility, Sharpe, Sortino, drawdown and Calmar for one equity curve."""
-    rf = risk_free / TRADING_DAYS
+    rf = risk_free / periods
     m = mean(daily_returns) - rf
     sd = stdev(daily_returns)
     # Downside deviation: only days below the risk-free return count as risk.
@@ -52,14 +56,14 @@ def summary(daily_returns: list[float], equity: list[float], risk_free: float = 
         math.sqrt(sum(min(r - rf, 0.0) ** 2 for r in daily_returns) / len(daily_returns)) if daily_returns else 0.0
     )
     total = equity[-1] / equity[0] - 1 if equity and equity[0] else 0.0
-    annual = annualise(total, len(daily_returns))
+    annual = annualise(total, len(daily_returns), periods)
     max_dd = abs(min(drawdowns(equity), default=0.0))
     return {
         "totalReturn": total,
         "annualizedReturn": annual,
-        "volatility": sd * math.sqrt(TRADING_DAYS),
-        "sharpe": m / sd * math.sqrt(TRADING_DAYS) if sd > 0 else 0.0,
-        "sortino": m / downside * math.sqrt(TRADING_DAYS) if downside > 0 else 0.0,
+        "volatility": sd * math.sqrt(periods),
+        "sharpe": m / sd * math.sqrt(periods) if sd > 0 else 0.0,
+        "sortino": m / downside * math.sqrt(periods) if downside > 0 else 0.0,
         "maxDrawdown": max_dd,
         "calmar": annual / max_dd if max_dd > 0 else 0.0,
     }
@@ -158,9 +162,11 @@ def monthly_returns(timestamps: list[str], equity: list[float], initial: float |
     ]
 
 
-def rolling_sharpe(daily_returns: list[float], window: int = 126, risk_free: float = 0.0) -> list[float | None]:
-    """Annualised Sharpe ratio over the trailing `window` days, aligned with an equity curve (first value None)."""
-    rf = risk_free / TRADING_DAYS
+def rolling_sharpe(
+    daily_returns: list[float], window: int = 126, risk_free: float = 0.0, periods: float = TRADING_DAYS
+) -> list[float | None]:
+    """Annualised Sharpe ratio over the trailing `window` bars, aligned with an equity curve (first value None)."""
+    rf = risk_free / periods
     out: list[float | None] = [None] * (len(daily_returns) + 1)
     s = s2 = 0.0
     for i, r in enumerate(daily_returns):
@@ -173,7 +179,7 @@ def rolling_sharpe(daily_returns: list[float], window: int = 126, risk_free: flo
         if i + 1 >= window:
             m = s / window
             var = max((s2 - window * m * m) / (window - 1), 0.0)
-            out[i + 1] = (m - rf) / math.sqrt(var) * math.sqrt(TRADING_DAYS) if var > 0 else 0.0
+            out[i + 1] = (m - rf) / math.sqrt(var) * math.sqrt(periods) if var > 0 else 0.0
     return out
 
 
@@ -193,3 +199,16 @@ def rolling_beta(
         var = sum((b - mb) ** 2 for _, b in chunk)
         out[i + 1] = cov / var if var > 0 else None
     return out
+
+
+def daily_closes(timestamps: list[str], values: list[float]) -> tuple[list[str], list[float]]:
+    """The last value of each calendar day, for comparing intraday equity curves with a daily index."""
+    out_ts: list[str] = []
+    out_values: list[float] = []
+    for ts, value in zip(timestamps, values, strict=True):
+        if out_ts and _day(out_ts[-1]) == _day(ts):
+            out_ts[-1], out_values[-1] = ts, value
+        else:
+            out_ts.append(ts)
+            out_values.append(value)
+    return out_ts, out_values

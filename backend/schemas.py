@@ -101,6 +101,8 @@ class SimulationInput(BaseModel):
 class SimulationUpdate(BaseModel):
     status: str | None = Field(default=None, max_length=30)
     notes: str | None = Field(default=None, max_length=400)
+    # Admins with Alpaca configured: also place this simulation's trades as Alpaca paper orders.
+    brokerMirror: bool | None = None
 
 
 class TrainingPayload(BaseModel):
@@ -135,9 +137,15 @@ class TrainingPayload(BaseModel):
     allowShort: bool = False
     borrowBps: float | None = Field(default=None, ge=0, le=5000)  # annual cost of borrowing shares to short
     riskFreeRate: float | None = Field(default=None, ge=0, le=0.25)
+    # Bar size: daily, or hourly (the last ~2 years that Yahoo provides).
+    interval: Literal["1d", "1h"] = "1d"
+    # Starting capital in the stock's currency, for after-tax returns and market impact (default by currency).
+    capital: float | None = Field(default=None, gt=0, le=1e10)
+    # Add a market-impact cost that grows with order size relative to the stock's traded value.
+    marketImpact: bool = False
 
 
-TUNABLE_STRATEGY = Literal["sma-crossover", "mean-reversion", "trend-follow", "regime-switch", "ml-logistic"]
+TUNABLE_STRATEGY = Literal["sma-crossover", "mean-reversion", "trend-follow", "regime-switch", "ml-logistic", "custom"]
 
 
 class WalkForwardPayload(BaseModel):
@@ -146,6 +154,7 @@ class WalkForwardPayload(BaseModel):
     slippageBps: float | None = Field(default=None, ge=0, le=100)
     execution: Literal["close", "next_open"] | None = None
     allowShort: bool = False
+    rules: StrategyRules | None = None  # for "custom": variants of these rules are tuned
 
 
 class RobustnessPayload(TrainingPayload):
@@ -173,6 +182,58 @@ class BasketPayload(BaseModel):
             raise ValueError("Symbols are at most 20 characters")
         self.symbols = cleaned
         return self
+
+
+class ReportPayload(RobustnessPayload):
+    title: str = Field(default="", max_length=80)
+    includeRobustness: bool = True
+
+
+class SipPayload(BaseModel):
+    symbol: str = Field(min_length=1, max_length=20)
+    monthly: float = Field(gt=0, le=1e8)  # instalment, in the stock's currency
+    stepUp: float = Field(default=0.0, ge=0, le=0.5)  # yearly increase of the instalment (0.1 = 10%)
+    years: int = Field(default=3, ge=1, le=4)
+    # Optional strategy that times the SIP: instalments wait in cash until its signal is on.
+    timingStrategy: str | None = Field(default=None, max_length=60)
+    timingRules: StrategyRules | None = None
+
+
+class OptionsPayload(BaseModel):
+    symbol: str = Field(min_length=1, max_length=20)
+    strategy: Literal["covered-call", "cash-secured-put"] = "covered-call"
+    otm: float = Field(default=0.05, ge=0, le=0.3)  # strike distance from the price (0.05 = 5% out of the money)
+    days: int = Field(default=21, ge=5, le=63)  # trading days to expiry
+    volPremium: float = Field(default=1.1, ge=0.5, le=2.0)  # implied / realised volatility
+    costBps: float = Field(default=5.0, ge=0, le=100)  # per option written, on the notional
+    riskFreeRate: float | None = Field(default=None, ge=0, le=0.25)
+
+
+class LeaderboardEntry(BaseModel):
+    name: str = Field(min_length=1, max_length=60)
+    rules: StrategyRules
+
+
+class LeaderboardPayload(BaseModel):
+    symbols: list[str] = Field(min_length=1, max_length=10)
+    custom: list[LeaderboardEntry] = Field(default_factory=list, max_length=10)
+
+    @model_validator(mode="after")
+    def check(self) -> LeaderboardPayload:
+        self.symbols = list(dict.fromkeys(s.strip().upper() for s in self.symbols if s.strip()))
+        if not self.symbols:
+            raise ValueError("Add at least one symbol")
+        return self
+
+
+class TextRulesPayload(BaseModel):
+    text: str = Field(min_length=5, max_length=1000)
+
+
+class WatchAlertInput(BaseModel):
+    symbol: str = Field(min_length=1, max_length=20)
+    condition: Condition
+    note: str | None = Field(default=None, max_length=120)
 
 
 class PineExportPayload(BaseModel):

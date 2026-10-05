@@ -72,6 +72,23 @@ class Settings(BaseModel):
     smtp_password: str = Field(default_factory=lambda: os.getenv("SMTP_PASSWORD", ""))
     smtp_from: str = Field(default_factory=lambda: os.getenv("SMTP_FROM", ""))
     telegram_bot_token: str = Field(default_factory=lambda: os.getenv("TELEGRAM_BOT_TOKEN", ""))
+    # After-tax returns for US-taxed assets: short-term (ordinary income) and long-term capital-gains rates.
+    us_short_term_tax: float = Field(default_factory=lambda: float(os.getenv("US_SHORT_TERM_TAX", "0.24")))
+    us_long_term_tax: float = Field(default_factory=lambda: float(os.getenv("US_LONG_TERM_TAX", "0.15")))
+    # Heavy research endpoints (robustness, baskets, optimiser...) allowed per user per minute, per server instance.
+    heavy_requests_per_minute: int = Field(default_factory=lambda: int(os.getenv("HEAVY_REQUESTS_PER_MINUTE", "20")))
+    # Error reporting (optional): a Sentry DSN.
+    sentry_dsn: str = Field(default_factory=lambda: os.getenv("SENTRY_DSN", ""))
+    # Alpaca paper trading (optional, admins only): mirror simulations' signals as paper orders.
+    alpaca_key_id: str = Field(default_factory=lambda: os.getenv("ALPACA_KEY_ID", ""))
+    alpaca_secret_key: str = Field(default_factory=lambda: os.getenv("ALPACA_SECRET_KEY", ""))
+    alpaca_base_url: str = Field(
+        default_factory=lambda: os.getenv("ALPACA_BASE_URL", "https://paper-api.alpaca.markets")
+    )
+    # Cache daily price history in MongoDB (when MongoDB is used), refreshing only the latest days.
+    cache_prices_in_db: bool = Field(default_factory=lambda: env_flag("CACHE_PRICES_IN_DB", "true"))
+    # The site's public address (e.g. https://algo-trade-mu.vercel.app), for share-link previews.
+    public_url: str = Field(default_factory=lambda: os.getenv("PUBLIC_URL", "").strip())
     # Built frontend (npm run build -> dist/) to serve from the API, for single-container deploys.
     static_dir: str = Field(default_factory=lambda: os.getenv("STATIC_DIR", ""))
     yahoo_user_agent: str = Field(

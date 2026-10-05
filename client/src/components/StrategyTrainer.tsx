@@ -1,6 +1,10 @@
 import { useState, type FormEvent } from "react";
+import { downloadFile } from "../api";
 import type {
+  BarInterval,
   ExecutionMode,
+  OptimizeResult,
+  ReviewResult,
   PredictionResult,
   RobustnessPayload,
   RobustnessResult,
@@ -21,12 +25,18 @@ import {
   RobustnessResults,
   WalkForwardResults,
 } from "./Research";
+import { OptimizePanel, ReviewPanel, ShareBox, TaxCard } from "./Insights";
 
 interface StrategyTrainerProps {
   onTrain: (payload: TrainingPayload) => Promise<void> | void;
   onPredict: (symbol: string) => Promise<void> | void;
   onWalkForward?: (payload: WalkForwardPayload) => Promise<WalkForwardResult>;
   onRobustness?: (payload: RobustnessPayload) => Promise<RobustnessResult>;
+  onOptimize?: (payload: TrainingPayload) => Promise<OptimizeResult>;
+  onReview?: (payload: RobustnessPayload) => Promise<ReviewResult>;
+  /** Creates a shareable report and returns its path (/r/<id>). */
+  onShare?: (payload: TrainingPayload) => Promise<string>;
+  onNotebook?: (payload: TrainingPayload) => Promise<Record<string, unknown>>;
   training: TrainingResult | null;
   prediction: PredictionResult | null;
   loading: boolean;
@@ -208,6 +218,20 @@ export function Metrics({ metrics, detailed = true }: { metrics: StrategyMetrics
       {metrics.execution ? (
         <MetricRow label="Orders fill at" value={EXECUTION_LABELS[metrics.execution]} />
       ) : null}
+      {typeof metrics.overnightReturn === "number" && typeof metrics.intradayReturn === "number" ? (
+        <MetricRow
+          label="Earned overnight / during the day"
+          value={`${pct(metrics.overnightReturn)} / ${pct(metrics.intradayReturn)}`}
+          hint="Price moves while invested: from one close to the next open (news, earnings) vs open to close"
+        />
+      ) : null}
+      {typeof metrics.impactCost === "number" ? (
+        <MetricRow
+          label="Market impact paid"
+          value={`${pct(metrics.impactCost)} (largest order ${pct(metrics.maxParticipation ?? 0)} of daily volume)`}
+          hint="Extra cost of moving the price, growing with order size relative to the stock's traded value"
+        />
+      ) : null}
     </ul>
   );
 }
@@ -281,6 +305,7 @@ export function BacktestResults({ training, description }: { training: TrainingR
         <RiskTable metrics={training.metrics} buyHold={training.buyHold} benchmark={training.benchmark} />
       ) : null}
       <Metrics metrics={training.metrics} detailed={!training.buyHold} />
+      {training.tax ? <TaxCard tax={training.tax} /> : null}
       {training.monthly?.length ? <MonthlyHeatmap monthly={training.monthly} /> : null}
       {training.model ? <ModelReportCard report={training.model} /> : null}
       {trades.length || training.openTrade ? (
@@ -328,6 +353,9 @@ export function BacktestResults({ training, description }: { training: TrainingR
 }
 
 export interface TradingSettings {
+  interval: BarInterval;
+  capital: number | null;
+  marketImpact: boolean;
   execution: ExecutionMode;
   sizing: SizingMode;
   sizeFraction: number;
@@ -340,6 +368,9 @@ export interface TradingSettings {
 }
 
 export const DEFAULT_TRADING: TradingSettings = {
+  interval: "1d",
+  capital: null,
+  marketImpact: false,
   execution: "next_open",
   sizing: "full",
   sizeFraction: 0.5,
@@ -353,6 +384,9 @@ export const DEFAULT_TRADING: TradingSettings = {
 
 export function tradingPayload(settings: TradingSettings) {
   return {
+    interval: settings.interval,
+    ...(settings.capital ? { capital: settings.capital } : {}),
+    marketImpact: settings.marketImpact,
     execution: settings.execution,
     sizing: settings.sizing,
     sizeFraction: settings.sizeFraction,
@@ -381,6 +415,13 @@ export function TradingSettingsFields({
   return (
     <fieldset className="trading-settings">
       <legend>Execution &amp; risk</legend>
+      <label>
+        <span>Bars</span>
+        <select value={value.interval} onChange={(e) => set("interval", e.target.value as BarInterval)}>
+          <option value="1d">Daily (5 years)</option>
+          <option value="1h">Hourly (last 2 years)</option>
+        </select>
+      </label>
       <label>
         <span>Orders fill at</span>
         <select value={value.execution} onChange={(e) => set("execution", e.target.value as ExecutionMode)}>
@@ -457,6 +498,22 @@ export function TradingSettingsFields({
           onChange={(e) => set("riskFreePct", clamp(Number(e.target.value), 0, 25))}
         />
       </label>
+      <label>
+        <span>Capital (tax &amp; impact)</span>
+        <input
+          type="number"
+          min={0}
+          step="any"
+          placeholder="auto"
+          value={value.capital ?? ""}
+          title="Starting capital in the stock's currency; defaults to 100,000 (₹10 lakh for Indian stocks)"
+          onChange={(e) => set("capital", Number(e.target.value) > 0 ? Number(e.target.value) : null)}
+        />
+      </label>
+      <label className="checkbox">
+        <input type="checkbox" checked={value.marketImpact} onChange={(e) => set("marketImpact", e.target.checked)} />
+        <span>Market impact</span>
+      </label>
       {shortable ? (
         <label className="checkbox">
           <input type="checkbox" checked={value.allowShort} onChange={(e) => set("allowShort", e.target.checked)} />
@@ -519,10 +576,19 @@ export function StrategyTrainer({
   onPredict,
   onWalkForward,
   onRobustness,
+  onOptimize,
+  onReview,
+  onShare,
+  onNotebook,
   training,
   prediction,
   loading,
 }: StrategyTrainerProps) {
+  const [busy, setBusy] = useState<string | null>(null);
+  const [toolError, setToolError] = useState<string | null>(null);
+  const [optimized, setOptimized] = useState<OptimizeResult | null>(null);
+  const [review, setReview] = useState<ReviewResult | null>(null);
+  const [sharePath, setSharePath] = useState<string | null>(null);
   const [symbol, setSymbol] = useState("AAPL");
   const [strategyId, setStrategyId] = useState<BuiltInStrategyId>("sma-crossover");
   const [params, setParams] = useState<Record<string, number>>(initialParams);
@@ -566,6 +632,34 @@ export function StrategyTrainer({
     } finally {
       setWalkLoading(false);
     }
+  };
+
+  const runTool = async (name: string, action: () => Promise<void>) => {
+    setBusy(name);
+    setToolError(null);
+    try {
+      await action();
+    } catch (error) {
+      setToolError(error instanceof Error ? error.message : `The ${name} failed.`);
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const exportTradesCsv = () => {
+    if (!training) return;
+    const rows = [
+      ["side", "entry_date", "entry_price", "exit_date", "exit_price", "return"],
+      ...[...training.trades, ...(training.openTrade ? [training.openTrade] : [])].map((t) => [
+        t.side ?? "long",
+        t.entryDate,
+        t.entryPrice.toFixed(4),
+        t === training.openTrade ? "open" : t.exitDate,
+        t.exitPrice.toFixed(4),
+        t.return.toFixed(6),
+      ]),
+    ];
+    downloadFile(`${training.symbol}-${training.strategyId}-trades.csv`, rows.map((r) => r.join(",")).join("\n"), "text/csv");
   };
 
   const handleRobustness = async () => {
@@ -650,6 +744,63 @@ export function StrategyTrainer({
             {loading ? "Working..." : "Today's signal"}
           </button>
         </div>
+        <div className="actions tool-actions">
+          {onOptimize ? (
+            <button
+              type="button"
+              className="button-ghost"
+              disabled={busy !== null || strategyId === "buy-hold"}
+              title="Search nearby settings, then check the best one for overfitting"
+              onClick={() => void runTool("optimiser", async () => setOptimized(await onOptimize(payload())))}
+            >
+              {busy === "optimiser" ? "Optimising..." : "Optimise"}
+            </button>
+          ) : null}
+          {onReview ? (
+            <button
+              type="button"
+              className="button-ghost"
+              disabled={busy !== null}
+              title="A sceptical review: costs, luck, overfitting, execution sensitivity"
+              onClick={() => void runTool("review", async () => setReview(await onReview(payload())))}
+            >
+              {busy === "review" ? "Reviewing..." : "Review this backtest"}
+            </button>
+          ) : null}
+          {onShare ? (
+            <button
+              type="button"
+              className="button-ghost"
+              disabled={busy !== null}
+              title="Create a public link with the results and robustness checks"
+              onClick={() => void runTool("share", async () => setSharePath(await onShare(payload())))}
+            >
+              {busy === "share" ? "Creating link..." : "Share"}
+            </button>
+          ) : null}
+          {onNotebook ? (
+            <button
+              type="button"
+              className="button-ghost"
+              disabled={busy !== null || strategyId === "ml-logistic"}
+              title={strategyId === "ml-logistic" ? "The ML strategy can't be exported" : "A Jupyter notebook that reproduces this backtest"}
+              onClick={() =>
+                void runTool("notebook export", async () => {
+                  const nb = await onNotebook(payload());
+                  downloadFile(`${symbol}-${strategyId}.ipynb`, JSON.stringify(nb, null, 1));
+                })
+              }
+            >
+              Notebook
+            </button>
+          ) : null}
+          <button type="button" className="button-ghost" disabled={!training} onClick={exportTradesCsv}>
+            Trades CSV
+          </button>
+          <button type="button" className="button-ghost" disabled={!training} onClick={() => window.print()}>
+            Print / PDF
+          </button>
+        </div>
       </form>
 
       {training ? (
@@ -665,6 +816,29 @@ export function StrategyTrainer({
           <span className="subtle">
             Signal: {prediction.signal.toUpperCase()} · Strength {Math.round(prediction.confidence * 100)}%
           </span>
+        </div>
+      ) : null}
+
+      {toolError ? <div className="error-banner walk-forward-slot">{toolError}</div> : null}
+      {sharePath ? (
+        <div className="walk-forward-slot">
+          <ShareBox path={sharePath} onClose={() => setSharePath(null)} />
+        </div>
+      ) : null}
+      {review ? (
+        <div className="walk-forward-slot">
+          <ReviewPanel review={review} />
+        </div>
+      ) : null}
+      {optimized ? (
+        <div className="walk-forward-slot">
+          <OptimizePanel
+            result={optimized}
+            onUse={(best) => {
+              setParams((previous) => ({ ...previous, ...best }));
+              setOptimized(null);
+            }}
+          />
         </div>
       ) : null}
 

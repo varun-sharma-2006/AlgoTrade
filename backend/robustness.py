@@ -59,6 +59,7 @@ def monte_carlo(
     block: int = 20,
     seed: int = 7,
     checkpoints: int = 60,
+    periods: float = risk.TRADING_DAYS,
 ) -> dict[str, Any] | None:
     """Stationary-block bootstrap of daily returns. Strategy and buy & hold are resampled on the same days."""
     total = len(returns)
@@ -94,7 +95,7 @@ def monte_carlo(
         drawdowns.append(-worst)
         mean = s / total
         var = (s2 - total * mean * mean) / (total - 1)
-        sharpes.append(mean / math.sqrt(var) * math.sqrt(risk.TRADING_DAYS) if var > 0 else 0.0)
+        sharpes.append(mean / math.sqrt(var) * math.sqrt(periods) if var > 0 else 0.0)
         beat += int(benchmark_returns is not None and equity > bench)
     return {
         "paths": paths,
@@ -120,12 +121,14 @@ def _moments(returns: list[float]) -> tuple[float, float, float, float]:
     return mean, sd, skew, kurt
 
 
-def deflated_sharpe(returns: list[float], trial_sharpes: list[float], risk_free: float = 0.0) -> dict[str, Any] | None:
+def deflated_sharpe(
+    returns: list[float], trial_sharpes: list[float], risk_free: float = 0.0, periods: float = risk.TRADING_DAYS
+) -> dict[str, Any] | None:
     """Deflated and probabilistic Sharpe ratio. `trial_sharpes` are the daily (not annualised) Sharpe ratios
     of every setting that was tried, including this one. Returns are measured above the risk-free rate."""
     if len(returns) < 30:
         return None
-    rf = risk_free / risk.TRADING_DAYS
+    rf = risk_free / periods
     returns = [r - rf for r in returns]
     mean, sd, skew, kurt = _moments(returns)
     sr = mean / sd if sd else 0.0
@@ -141,7 +144,7 @@ def deflated_sharpe(returns: list[float], trial_sharpes: list[float], risk_free:
         expected_max = 0.0
     denominator = math.sqrt(max(1 - skew * sr + (kurt - 1) / 4 * sr * sr, 1e-12))
     scale = math.sqrt(len(returns) - 1) / denominator
-    annual = math.sqrt(risk.TRADING_DAYS)
+    annual = math.sqrt(periods)
     return {
         "trials": trials,
         "sharpe": sr * annual,
@@ -153,7 +156,7 @@ def deflated_sharpe(returns: list[float], trial_sharpes: list[float], risk_free:
     }
 
 
-def pbo(trial_returns: list[list[float]], slices: int = 8) -> dict[str, Any] | None:
+def pbo(trial_returns: list[list[float]], slices: int = 8, periods: float = risk.TRADING_DAYS) -> dict[str, Any] | None:
     """Probability of backtest overfitting by combinatorially symmetric cross-validation."""
     trials = len(trial_returns)
     length = min((len(r) for r in trial_returns), default=0)
@@ -188,7 +191,7 @@ def pbo(trial_returns: list[list[float]], slices: int = 8) -> dict[str, Any] | N
         rank = below + 1 + ties / 2  # 1 = worst, trials = best
         omega = rank / (trials + 1)
         logits.append(math.log(omega / (1 - omega)))
-        oos_of_winner.append(score * math.sqrt(risk.TRADING_DAYS))
+        oos_of_winner.append(score * math.sqrt(periods))
     return {
         "pbo": sum(1 for x in logits if x <= 0) / len(logits),
         "combinations": len(logits),
@@ -213,6 +216,7 @@ def sensitivity(
     risk_free: float = 0.0,
     bars: strategies.Bars | None = None,
     market_closes: list[float | None] | None = None,
+    periods: float = risk.TRADING_DAYS,
 ) -> tuple[dict[str, Any] | None, list[list[float]]]:
     """Sharpe, return and drawdown over a grid of settings (full-size positions), plus each setting's returns."""
     spec = SENSITIVITY_GRIDS.get(strategy_id)
@@ -236,9 +240,17 @@ def sensitivity(
                 strategy_id, closes, params, allow_short=allow_short, bars=bars, market_closes=market_closes
             )["target"]
             run = strategies.simulate(
-                closes, target, start, last, buy_cost_bps, sell_cost_bps=sell_cost_bps, opens=opens, execution=execution
+                closes,
+                target,
+                start,
+                last,
+                buy_cost_bps,
+                sell_cost_bps=sell_cost_bps,
+                opens=opens,
+                execution=execution,
+                periods=periods,
             )
-            stats = risk.summary(run["dailyReturns"], [1.0, *run["equity"]], risk_free)
+            stats = risk.summary(run["dailyReturns"], [1.0, *run["equity"]], risk_free, periods)
             cells.append(
                 cell
                 | {
@@ -268,8 +280,79 @@ def sensitivity(
     )
 
 
-def daily_sharpe(returns: list[float], risk_free: float = 0.0) -> float:
+def daily_sharpe(returns: list[float], risk_free: float = 0.0, periods: float = risk.TRADING_DAYS) -> float:
+    """Per-bar (not annualised) Sharpe ratio."""
     if len(returns) < 2:
         return 0.0
     sd = risk.stdev(returns)
-    return (risk.mean(returns) - risk_free / risk.TRADING_DAYS) / sd if sd else 0.0
+    return (risk.mean(returns) - risk_free / periods) / sd if sd else 0.0
+
+
+def random_entries(
+    closes: list[float],
+    start: int,
+    trade_bars: list[int],
+    actual_return: float,
+    cost_bps: float,
+    *,
+    paths: int = 300,
+    seed: int = 11,
+) -> dict[str, Any] | None:
+    """Would random timing have done as well? Places the same number of trades, with the same holding
+    periods, at random non-overlapping times in the window, and ranks the strategy's return among them."""
+    last = len(closes) - 1
+    span = last - start
+    durations = [max(1, b) for b in trade_bars]
+    if not durations or sum(durations) >= span:
+        return None
+    rng = random.Random(seed)
+    cost = cost_bps / 10_000
+    results = []
+    for _ in range(paths):
+        order = durations[:]
+        rng.shuffle(order)
+        free = span - sum(order)
+        # Random gaps that add up to the free bars: stars and bars.
+        cuts = sorted(rng.randint(0, free) for _ in order)
+        gaps = [cuts[0]] + [cuts[i] - cuts[i - 1] for i in range(1, len(cuts))]
+        t, value = start, 1.0
+        for gap, held in zip(gaps, order, strict=True):
+            t += gap
+            value *= (1 - cost) * closes[min(t + held, last)] / closes[t] * (1 - cost)
+            t += held
+        results.append(value - 1)
+    results.sort()
+    beaten = sum(1 for r in results if r < actual_return)
+    return {
+        "paths": paths,
+        "trades": len(durations),
+        "percentile": beaten / paths,
+        "median": results[len(results) // 2],
+        "p95": results[int(0.95 * (paths - 1))],
+    }
+
+
+def sixty_forty(
+    stock: tuple[list[str], list[float]],
+    bond: tuple[list[str], list[float]],
+    start_day: str,
+    risk_free: float = 0.0,
+) -> dict[str, Any] | None:
+    """A 60% stocks / 40% bonds portfolio rebalanced monthly, from `start_day` (a classic passive benchmark)."""
+    s_by = {ts[:10]: c for ts, c in zip(*stock, strict=True)}
+    b_by = {ts[:10]: c for ts, c in zip(*bond, strict=True)}
+    days = sorted(d for d in s_by if d in b_by and d >= start_day[:10])
+    if len(days) < 60:
+        return None
+    value, w_s, w_b = 1.0, 0.6, 0.4
+    equity, returns = [1.0], []
+    for prev, day in zip(days[:-1], days[1:], strict=True):
+        if day[:7] != prev[:7]:
+            w_s, w_b = 0.6, 0.4  # rebalance on the first day of each month
+        rs, rb = s_by[day] / s_by[prev] - 1, b_by[day] / b_by[prev] - 1
+        growth = w_s * (1 + rs) + w_b * (1 + rb)
+        w_s, w_b = w_s * (1 + rs) / growth, w_b * (1 + rb) / growth
+        returns.append(growth - 1)
+        value *= growth
+        equity.append(value)
+    return risk.summary(returns, equity, risk_free)

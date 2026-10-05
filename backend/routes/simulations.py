@@ -6,7 +6,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 
 from backend import strategies
-from backend.deps import get_current_user, get_db
+from backend.deps import get_current_user, get_db, is_admin
 from backend.schemas import SimulationInput, SimulationUpdate
 from backend.stores import Store, now
 
@@ -53,6 +53,8 @@ async def patch_simulation(
     user: dict[str, Any] = Depends(get_current_user),
     store: Store = Depends(get_db),
 ) -> dict[str, Any]:
+    if payload.brokerMirror is not None and not is_admin(user):
+        raise HTTPException(status_code=403, detail="Only admins can mirror simulations to a broker")
     try:
         return await store.update_simulation(user["id"], sim_id, payload)
     except KeyError as exc:

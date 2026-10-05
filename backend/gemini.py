@@ -112,3 +112,42 @@ def _generate(model: str, body: dict[str, Any], deadline: float) -> dict[str, An
     content = response.json()["candidates"][0]["content"]
     content.setdefault("role", "model")
     return content
+
+
+def _single(system: str, prompt: str, extra: dict[str, Any] | None = None, budget: float = 12.0) -> str | None:
+    """One prompt, one answer, trying each available model once within `budget` seconds."""
+    if not settings.google_api_key:
+        return None
+    body: dict[str, Any] = {
+        "systemInstruction": {"parts": [{"text": system}]},
+        "contents": [{"role": "user", "parts": [{"text": prompt}]}],
+    } | (extra or {})
+    deadline = time.monotonic() + budget
+    for model in [m for m in settings.gemini_models if _cooldown_until.get(m, 0) <= time.time()]:
+        try:
+            # Cap each model so one slow model can't use up the whole budget.
+            parts = _generate(model, body, min(deadline, time.monotonic() + 6)).get("parts") or []
+            text = "".join(part.get("text", "") for part in parts).strip()
+            if text:
+                return text
+        except Exception as exc:
+            logger.warning("Gemini model %s failed: %s", model, str(exc)[:160])
+    return None
+
+
+def ask_text(system: str, prompt: str) -> str | None:
+    """Plain-text answer, or None without a key or when every model fails."""
+    return _single(system, prompt)
+
+
+def ask_json(system: str, prompt: str, schema: dict[str, Any]) -> dict[str, Any] | None:
+    """A JSON object matching `schema` (Gemini structured output), or None."""
+    import json
+
+    text = _single(
+        system, prompt, {"generationConfig": {"responseMimeType": "application/json", "responseSchema": schema}}
+    )
+    try:
+        return json.loads(text) if text else None
+    except ValueError:
+        return None

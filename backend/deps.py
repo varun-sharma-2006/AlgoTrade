@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import time
 from typing import Any
 
 from fastapi import Depends, Header, HTTPException, Request, status
@@ -39,4 +40,21 @@ def is_admin(user: dict[str, Any]) -> bool:
 async def require_admin(user: dict[str, Any] = Depends(get_current_user)) -> dict[str, Any]:
     if not is_admin(user):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admins only")
+    return user
+
+
+_heavy_hits: dict[str, list[float]] = {}
+
+
+async def heavy_limit(user: dict[str, Any] = Depends(get_current_user)) -> dict[str, Any]:
+    """Rate limit for CPU-heavy research endpoints: HEAVY_REQUESTS_PER_MINUTE per user (per server instance)."""
+    stamp = time.time()
+    recent = [t for t in _heavy_hits.get(user["id"], []) if stamp - t < 60]
+    if len(recent) >= settings.heavy_requests_per_minute:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Too many research runs in the last minute; please wait a moment and try again",
+        )
+    recent.append(stamp)
+    _heavy_hits[user["id"]] = recent
     return user

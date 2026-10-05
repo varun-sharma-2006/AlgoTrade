@@ -154,6 +154,7 @@ export interface PortfolioPosition {
   baseCurrency?: string;
   /** An order decided at the last close that fills at the next open. */
   pendingOrder?: "buy" | "sell" | null;
+  brokerMirror?: boolean;
   error?: string;
 }
 
@@ -189,6 +190,7 @@ export interface PortfolioResponse {
 export interface SimulationUpdate {
   status?: string;
   notes?: string | null;
+  brokerMirror?: boolean;
 }
 
 export interface OverviewTotals {
@@ -257,6 +259,11 @@ export interface StrategyMetrics {
   execution?: ExecutionMode;
   sizing?: SizingMode;
   allowShort?: boolean;
+  periodsPerYear?: number;
+  overnightReturn?: number | null;
+  intradayReturn?: number | null;
+  impactCost?: number | null;
+  maxParticipation?: number | null;
 }
 
 export type ExecutionMode = "close" | "next_open";
@@ -311,6 +318,24 @@ export interface TrainingPayload {
   allowShort?: boolean;
   borrowBps?: number;
   riskFreeRate?: number;
+  interval?: BarInterval;
+  capital?: number;
+  marketImpact?: boolean;
+}
+
+export type BarInterval = "1d" | "1h";
+
+export interface TaxReport {
+  region: "IN" | "US";
+  crypto: boolean;
+  currency: string;
+  capital: number;
+  rules: string;
+  totalTax: number;
+  preTaxReturn: number;
+  afterTaxReturn: number;
+  carryForwardLoss: number;
+  years: Array<{ year: string; shortTermGain: number; longTermGain: number; taxableLongTerm: number; tax: number }>;
 }
 
 export interface BacktestTrade {
@@ -334,6 +359,8 @@ export interface TrainingResult {
   model?: ModelReport;
   costs?: CostModel;
   currency?: string;
+  interval?: BarInterval;
+  tax?: TaxReport;
   monthly?: MonthlyReturn[];
   trades: BacktestTrade[];
   openTrade: BacktestTrade | null;
@@ -380,7 +407,13 @@ export interface ModelReport {
   suggestedThreshold?: number | null;
 }
 
-export type WalkForwardStrategyId = "sma-crossover" | "mean-reversion" | "trend-follow" | "regime-switch" | "ml-logistic";
+export type WalkForwardStrategyId =
+  | "sma-crossover"
+  | "mean-reversion"
+  | "trend-follow"
+  | "regime-switch"
+  | "ml-logistic"
+  | "custom";
 
 export interface WalkForwardPayload {
   symbol: string;
@@ -388,6 +421,7 @@ export interface WalkForwardPayload {
   slippageBps?: number;
   execution?: ExecutionMode;
   allowShort?: boolean;
+  rules?: StrategyRules;
 }
 
 /* ---------- Robustness ---------- */
@@ -457,7 +491,21 @@ export interface RobustnessResult {
     medianLogit: number;
     winnerOutOfSampleSharpe: number;
   } | null;
+  randomEntries?: { paths: number; trades: number; percentile: number; median: number; p95: number } | null;
+  sixtyForty?: RiskStats | null;
+  factors?: FactorAttribution | null;
   period: { start: string; end: string; days: number };
+}
+
+export interface FactorAttribution {
+  days: number;
+  start: string;
+  end: string;
+  alpha: number;
+  alphaT: number;
+  alphaSignificant: boolean;
+  rSquared: number;
+  loadings: Array<{ factor: string; label: string; beta: number; t: number }>;
 }
 
 /* ---------- Basket (portfolio) backtests ---------- */
@@ -543,7 +591,7 @@ export interface AlertSettings {
 
 export interface AlertSettingsResponse {
   settings: AlertSettings;
-  available: { email: boolean; telegram: boolean };
+  available: { email: boolean; telegram: boolean; broker?: boolean };
 }
 
 export interface DailySignal {
@@ -556,6 +604,7 @@ export interface DailySignal {
   price: number;
   currency: string;
   actionable: boolean;
+  brokerMirror?: boolean;
 }
 
 export interface WalkForwardFold {
@@ -676,4 +725,169 @@ export interface ChartResponse {
   range: string;
   interval: string;
   previousClose?: number | null;
+}
+
+/* ---------- Research tools ---------- */
+
+export interface OptimizeResult {
+  symbol: string;
+  strategyId: string;
+  current: { parameters: Record<string, number>; sharpe: number; totalReturn: number };
+  best: { parameters: Record<string, number>; sharpe: number; totalReturn: number; maxDrawdown: number; trades: number };
+  trials: number;
+  deflatedSharpe: RobustnessResult["deflatedSharpe"];
+  pbo: RobustnessResult["pbo"];
+  walkForward: { inSampleAnnualized: number; outOfSampleAnnualized: number; buyHoldAnnualized: number } | null;
+  warnings: string[];
+  trustworthy: boolean;
+}
+
+export interface ReviewFinding {
+  level: "good" | "warn" | "bad";
+  title: string;
+  detail: string;
+}
+
+export interface ReviewVerdict {
+  label: string;
+  text: string;
+  good: number;
+  bad: number;
+  warnings: number;
+}
+
+export interface ReviewResult {
+  symbol: string;
+  strategyId: string;
+  findings: ReviewFinding[];
+  verdict: ReviewVerdict;
+  summary: string | null;
+}
+
+export interface LeaderboardRow {
+  strategyId: string;
+  name: string;
+  symbols: number;
+  medianSharpe: number;
+  worstSharpe: number;
+  medianReturn: number;
+  medianMaxDrawdown: number;
+  shareBeatBuyHold: number;
+  shareBetterSharpe: number;
+  score: number;
+  results: Array<{ symbol: string; sharpe: number; totalReturn: number; excessReturn: number; maxDrawdown: number }>;
+}
+
+export interface LeaderboardResult {
+  symbols: string[];
+  missing: string[];
+  rows: LeaderboardRow[];
+}
+
+export interface SipPayload {
+  symbol: string;
+  monthly: number;
+  stepUp: number;
+  years: number;
+  timingStrategy?: string | null;
+  timingRules?: StrategyRules | null;
+}
+
+export interface SipOutcome {
+  value: number;
+  gain: number;
+  xirr?: number | null;
+  cagr?: number | null;
+  taxIfRedeemed: number;
+  cashWaiting?: number;
+}
+
+export interface SipResult {
+  symbol: string;
+  currency: string;
+  region: "IN" | "US";
+  timingStrategy: string | null;
+  months: number;
+  years: number;
+  invested: number;
+  lastInstalment: number;
+  sip: SipOutcome;
+  lumpSum: SipOutcome;
+  timed?: SipOutcome;
+  series: Array<{ date: string; invested: number; sip: number; lumpSum: number; timed: number | null }>;
+  period: { start: string; end: string };
+}
+
+export interface OptionsPayload {
+  symbol: string;
+  strategy: "covered-call" | "cash-secured-put";
+  otm: number;
+  days: number;
+  volPremium: number;
+  costBps: number;
+}
+
+export interface OptionsResult {
+  symbol: string;
+  currency: string;
+  lastPrice: number;
+  strategy: OptionsPayload["strategy"];
+  otm: number;
+  days: number;
+  volPremium: number;
+  metrics: RiskStats & {
+    buyHoldReturn: number;
+    excessReturn: number;
+    premiumYield: number;
+    rolls: number;
+    assigned: number;
+    assignedShare: number;
+  };
+  buyHold: RiskStats;
+  curve: Array<{ timestamp: string; equity: number; buyHold: number; drawdown: number }>;
+  period: { start: string; end: string; days: number };
+}
+
+export interface ReportSummary {
+  id: string;
+  title: string;
+  author: string;
+  createdAt: string;
+  symbol?: string | null;
+  path?: string;
+}
+
+export interface SharedReport {
+  id: string;
+  title: string;
+  author: string;
+  createdAt: string;
+  content: {
+    backtest: TrainingResult;
+    robustness: RobustnessResult | null;
+    review: { findings: ReviewFinding[]; verdict: ReviewVerdict };
+    settings: TrainingPayload;
+  };
+}
+
+export interface TextRulesResult {
+  rules: StrategyRules;
+  source: "gemini" | "parser";
+  notes: string;
+}
+
+export interface WatchAlert {
+  id: string;
+  symbol: string;
+  condition: Condition;
+  note?: string | null;
+  status: {
+    triggered: boolean;
+    left: number | null;
+    right: number | null;
+    date: string;
+    price: number;
+    currency: string;
+    description: string;
+  } | null;
 }

@@ -7,10 +7,10 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
 
-from backend import basket, costs, ml, risk, robustness, strategies, walkforward
+from backend import basket, costs, factors, ml, risk, robustness, strategies, tax, walkforward
 from backend import rules as rule_engine
 from backend.config import logger, settings
-from backend.deps import get_current_user, get_db
+from backend.deps import get_current_user, get_db, heavy_limit
 from backend.market import WATCHLIST_SYMBOLS, fetch_chart
 from backend.routes.market import parse_symbols
 from backend.schemas import (
@@ -26,6 +26,9 @@ from backend.stores import Store, now, serialize_mongo_doc
 router = APIRouter(tags=["analytics"])
 
 MAX_ML_BASKET = 8  # the ML strategy retrains per stock, so big ML baskets would be slow
+HOURLY_RANGE = "730d"  # Yahoo keeps about two years of hourly bars
+HOURLY_BACKTEST_DAYS = 365  # hourly backtests report on the last year; the first year warms up and trains
+MAX_SAMPLE_POINTS = 2500  # thin long hourly series before sending them to the browser
 
 
 def strategy_params(payload: TrainingPayload) -> dict[str, float]:
@@ -43,6 +46,9 @@ def trading_options(payload: TrainingPayload | None = None) -> dict[str, Any]:
             "borrowBps": settings.borrow_bps,
             "riskFree": settings.risk_free_rate,
             "slippage": settings.slippage_bps,
+            "interval": "1d",
+            "capital": None,
+            "impact": False,
         }
     return {
         "execution": payload.execution or settings.execution,
@@ -56,7 +62,15 @@ def trading_options(payload: TrainingPayload | None = None) -> dict[str, Any]:
         "borrowBps": settings.borrow_bps if payload.borrowBps is None else payload.borrowBps,
         "riskFree": settings.risk_free_rate if payload.riskFreeRate is None else payload.riskFreeRate,
         "slippage": settings.slippage_bps if payload.slippageBps is None else payload.slippageBps,
+        "interval": payload.interval,
+        "capital": payload.capital,
+        "impact": payload.marketImpact,
     }
+
+
+def default_capital(currency: str) -> float:
+    """Starting capital used for after-tax returns and market impact when none is given."""
+    return 1_000_000.0 if currency.upper() == "INR" else 100_000.0
 
 
 @router.get("/analytics/strategies")
@@ -106,9 +120,11 @@ BENCHMARK_CACHE_SECONDS = 600
 _benchmark_cache: dict[str, tuple[float, tuple[list[str], list[float]] | None]] = {}
 
 
-def load(symbol: str) -> dict[str, Any]:
-    """Daily closes, timestamps, OHLCV bars and currency over HISTORY_PERIOD (backtest window plus warm-up)."""
-    chart = fetch_chart(symbol, range_value=settings.history_period, interval="1d")
+def load(symbol: str, interval: str = "1d") -> dict[str, Any]:
+    """Closes, timestamps, OHLCV bars and currency: daily over HISTORY_PERIOD (backtest window plus warm-up),
+    or hourly over the last two years."""
+    range_value = HOURLY_RANGE if interval == "1h" else settings.history_period
+    chart = fetch_chart(symbol, range_value=range_value, interval=interval)
     points = chart["points"]
     bars = {key: [p.get(key) for p in points] for key in ("open", "high", "low", "volume")}
     return {
@@ -116,6 +132,7 @@ def load(symbol: str) -> dict[str, Any]:
         "timestamps": [p["timestamp"] for p in points],
         "bars": bars,
         "currency": chart.get("currency") or "USD",
+        "interval": interval,
     }
 
 
@@ -165,9 +182,12 @@ def backtest_on(
         raise HTTPException(status_code=422, detail=problem)
     if len(closes) < strategies.warmup(strategy_id, params, rules) + 30:
         raise HTTPException(status_code=422, detail="Not enough price history for these parameters")
-    start = strategies.evaluation_start(timestamps, strategies.period_days(settings.backtest_period))
+    start = evaluation_start(timestamps, data.get("interval", "1d"))
     cost = costs.cost_model(symbol, settings.trading_fee_bps, options["slippage"], settings.india_brokerage_bps)
     market = market_series(timestamps, bench) if strategy_id == "ml-logistic" else None
+    currency = data.get("currency") or "USD"
+    capital = options.get("capital") or default_capital(currency)
+    periods = strategies.bars_per_year(timestamps, symbol)
     report = strategies.backtest(
         closes,
         timestamps,
@@ -187,18 +207,37 @@ def backtest_on(
         borrow_bps=options["borrowBps"],
         risk_free=options["riskFree"],
         market_closes=market,
+        periods=periods,
+        impact={"capital": capital} if options.get("impact") else None,
     )
     if strategy_id == "ml-logistic":
         report["model"] = ml.report(closes, params, start, cost_bps=cost["buyBps"], bars=bars, market=market)
+    region, crypto = costs.tax_region(symbol, settings.base_currency)
+    report["tax"] = tax.tax_report(
+        report["_trades"],
+        capital,
+        report["_finalEquity"],
+        region=region,
+        crypto=crypto,
+        currency=currency,
+        us_short_rate=settings.us_short_term_tax,
+        us_long_rate=settings.us_long_term_tax,
+    )
     return {
         "symbol": symbol.upper(),
         "strategyId": strategy_id,
         "parameters": params,
         "rules": rules,
-        "currency": data.get("currency") or "USD",
+        "currency": currency,
+        "interval": data.get("interval", "1d"),
         "costs": cost,
         **report,
     }
+
+
+def evaluation_start(timestamps: list[str], interval: str = "1d") -> int:
+    days = HOURLY_BACKTEST_DAYS if interval == "1h" else strategies.period_days(settings.backtest_period)
+    return strategies.evaluation_start(timestamps, days)
 
 
 def run_backtest(
@@ -212,7 +251,7 @@ def run_backtest(
     options = options or trading_options()
     if slippage_bps is not None:
         options = options | {"slippage": slippage_bps}
-    data = load(symbol)
+    data = load(symbol, options.get("interval", "1d"))
     bench = benchmark_history(costs.benchmark_for(symbol)[0])
     return backtest_on(symbol, data, strategy_id, params, rules, options, bench)
 
@@ -243,9 +282,12 @@ def run_walk_forward(
     *,
     execution: str | None = None,
     allow_short: bool = False,
+    rules: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    if strategy_id not in walkforward.GRIDS:
+    if strategy_id not in walkforward.GRIDS and strategy_id != "custom":
         raise HTTPException(status_code=422, detail="Walk-forward testing needs a strategy with parameters to tune")
+    if strategy_id == "custom" and not (rules and rules.get("entry")):
+        raise HTTPException(status_code=422, detail="Send the custom strategy's rules to walk-forward test them")
     data = load(symbol)
     slippage = settings.slippage_bps if slippage_bps is None else slippage_bps
     cost = costs.cost_model(symbol, settings.trading_fee_bps, slippage, settings.india_brokerage_bps)
@@ -260,6 +302,7 @@ def run_walk_forward(
             opens=None if opens is None or None in opens else opens,
             execution=execution or settings.execution,
             allow_short=allow_short,
+            rules=rules,
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
@@ -273,7 +316,13 @@ def run_walk_forward(
 
 
 def _public(report: dict[str, Any]) -> dict[str, Any]:
-    return {key: value for key, value in report.items() if key != "dailyReturns"}
+    """The report without internal fields, with long (hourly) daily series thinned for the browser."""
+    out = {key: value for key, value in report.items() if key != "dailyReturns" and not key.startswith("_")}
+    sample = out.get("sample") or []
+    if len(sample) > MAX_SAMPLE_POINTS:
+        step = -(-len(sample) // MAX_SAMPLE_POINTS)
+        out["sample"] = sample[::step] + ([sample[-1]] if (len(sample) - 1) % step else [])
+    return out
 
 
 @router.post("/analytics/train")
@@ -298,7 +347,7 @@ async def train_strategy(
     return result
 
 
-@router.post("/analytics/walk-forward", dependencies=[Depends(get_current_user)])
+@router.post("/analytics/walk-forward", dependencies=[Depends(heavy_limit)])
 async def walk_forward(payload: WalkForwardPayload) -> dict[str, Any]:
     return await asyncio.to_thread(
         run_walk_forward,
@@ -307,24 +356,27 @@ async def walk_forward(payload: WalkForwardPayload) -> dict[str, Any]:
         payload.slippageBps,
         execution=payload.execution,
         allow_short=payload.allowShort,
+        rules=payload.rules.model_dump() if payload.rules else None,
     )
 
 
-def run_robustness(payload: RobustnessPayload) -> dict[str, Any]:
+def run_robustness(payload: RobustnessPayload, report: dict[str, Any] | None = None) -> dict[str, Any]:
     params = strategy_params(payload)
     rules = payload.rules.model_dump() if payload.rules else None
     options = trading_options(payload)
-    data = load(payload.symbol)
+    data = load(payload.symbol, payload.interval)
     bench = benchmark_history(costs.benchmark_for(payload.symbol)[0])
-    report = backtest_on(payload.symbol, data, payload.strategyId, params, rules, options, bench)
+    if report is None:
+        report = backtest_on(payload.symbol, data, payload.strategyId, params, rules, options, bench)
+    periods = report["metrics"].get("periodsPerYear") or risk.TRADING_DAYS
     daily = report["dailyReturns"]
     sample = report["sample"]
     hold = [sample[k]["buyHold"] / sample[k - 1]["buyHold"] - 1 for k in range(1, len(sample))]
-    monte = robustness.monte_carlo(daily, hold, paths=payload.paths)
+    monte = robustness.monte_carlo(daily, hold, paths=payload.paths, periods=periods)
     if monte:
         for point in monte["fan"]:
             point["timestamp"] = sample[min(point["step"], len(sample) - 1)]["timestamp"]
-    start = strategies.evaluation_start(data["timestamps"], strategies.period_days(settings.backtest_period))
+    start = evaluation_start(data["timestamps"], payload.interval)
     opens = data["bars"].get("open")
     grid, trials = (None, [])
     if payload.strategyId != "custom":
@@ -341,9 +393,22 @@ def run_robustness(payload: RobustnessPayload) -> dict[str, Any]:
             risk_free=options["riskFree"],
             bars=data["bars"],
             market_closes=market_series(data["timestamps"], bench) if payload.strategyId == "ml-logistic" else None,
+            periods=periods,
         )
     rf = options["riskFree"]
-    trial_sharpes = [robustness.daily_sharpe(r, rf) for r in trials] or [robustness.daily_sharpe(daily, rf)]
+    trial_sharpes = [robustness.daily_sharpe(r, rf, periods) for r in trials] or [
+        robustness.daily_sharpe(daily, rf, periods)
+    ]
+    random_timing = None
+    if report["metrics"].get("shortTrades", 0) == 0 and report.get("_trades"):
+        random_timing = robustness.random_entries(
+            data["closes"],
+            start,
+            [t["bars"] for t in report["_trades"]],
+            report["metrics"]["totalReturn"],
+            report["costs"]["buyBps"],
+        )
+    us_stock = costs.market(payload.symbol) == "US" and payload.interval == "1d"
     return {
         "symbol": payload.symbol.upper(),
         "strategyId": payload.strategyId,
@@ -353,13 +418,25 @@ def run_robustness(payload: RobustnessPayload) -> dict[str, Any]:
         },
         "monteCarlo": monte,
         "sensitivity": grid,
-        "deflatedSharpe": robustness.deflated_sharpe(daily, trial_sharpes, rf),
-        "pbo": robustness.pbo(trials) if trials else None,
+        "deflatedSharpe": robustness.deflated_sharpe(daily, trial_sharpes, rf, periods),
+        "pbo": robustness.pbo(trials, periods=periods) if trials else None,
+        "randomEntries": random_timing,
+        "sixtyForty": sixty_forty(report["period"]["start"], rf) if us_stock else None,
+        "factors": factors.attribution(data["timestamps"][start:], daily) if us_stock else None,
         "period": report["period"],
     }
 
 
-@router.post("/analytics/robustness", dependencies=[Depends(get_current_user)])
+def sixty_forty(start_day: str, risk_free: float) -> dict[str, Any] | None:
+    """60% S&P 500 ETF (SPY) / 40% US bond ETF (AGG), rebalanced monthly, over the same window."""
+    try:
+        spy, agg = history("SPY"), history("AGG")
+    except HTTPException:
+        return None
+    return robustness.sixty_forty((spy[1], spy[0]), (agg[1], agg[0]), start_day, risk_free)
+
+
+@router.post("/analytics/robustness", dependencies=[Depends(heavy_limit)])
 async def robustness_check(payload: RobustnessPayload) -> dict[str, Any]:
     return await asyncio.to_thread(run_robustness, payload)
 
@@ -444,7 +521,7 @@ def run_basket(payload: BasketPayload) -> dict[str, Any]:
     }
 
 
-@router.post("/analytics/basket", dependencies=[Depends(get_current_user)])
+@router.post("/analytics/basket", dependencies=[Depends(heavy_limit)])
 async def basket_backtest(payload: BasketPayload) -> dict[str, Any]:
     return await asyncio.to_thread(run_basket, payload)
 
