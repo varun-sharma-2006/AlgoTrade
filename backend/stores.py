@@ -21,7 +21,7 @@ from motor.motor_asyncio import AsyncIOMotorClient, AsyncIOMotorCollection
 from passlib.context import CryptContext
 
 from backend.config import logger, settings
-from backend.schemas import CustomStrategyInput, SimulationInput, SimulationUpdate
+from backend.schemas import CustomStrategyInput, SimulationInput, SimulationUpdate, WatchAlertInput
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
@@ -109,6 +109,24 @@ def session_allowed(provider: str | None) -> bool:
 
 MAX_CUSTOM_STRATEGIES = 20
 DEFAULT_ALERTS: dict[str, Any] = {"email": False, "telegramChatId": None}
+MAX_REPORTS = 50
+MAX_WATCH_ALERTS = 20
+
+
+def _first_name(user: dict[str, Any]) -> str:
+    """Shown as a shared report's author (never the email address)."""
+    return (user.get("name") or "A trader").split(" ")[0][:40]
+
+
+def _report_summary(record: dict[str, Any]) -> dict[str, Any]:
+    content = record.get("content") or {}
+    return {
+        "id": record["id"],
+        "title": record["title"],
+        "author": record["author"],
+        "createdAt": record["createdAt"],
+        "symbol": (content.get("backtest") or {}).get("symbol"),
+    }
 
 
 def _simulation_trading_fields(payload: SimulationInput) -> dict[str, Any]:
@@ -316,6 +334,54 @@ class MongoStore:
     async def mark_alerted(self, sim_id: str, key: str) -> None:
         await self.simulations.update_one({"_id": _object_id(sim_id)}, {"$set": {"lastAlert": key}})
 
+    # Shared backtest reports (public by id)
+    async def create_report(self, user: dict[str, Any], title: str, content: dict[str, Any]) -> dict[str, Any]:
+        doc = {
+            "_id": secrets.token_urlsafe(8),
+            "userId": ObjectId(user["id"]),
+            "author": _first_name(user),
+            "title": title,
+            "createdAt": now(),
+            "content": content,
+        }
+        await self.db.reports.insert_one(doc)
+        return _report_summary(serialize_mongo_doc(doc))
+
+    async def get_report(self, report_id: str) -> dict[str, Any] | None:
+        doc = await self.db.reports.find_one({"_id": report_id})
+        return serialize_mongo_doc(doc) if doc else None
+
+    async def list_reports(self, user_id: str) -> list[dict[str, Any]]:
+        cursor = self.db.reports.find({"userId": ObjectId(user_id)}, {"content": 0}).sort("createdAt", -1)
+        return [_report_summary(d) for d in serialize_mongo_doc(await cursor.to_list(length=MAX_REPORTS))]
+
+    async def delete_report(self, user_id: str, report_id: str) -> None:
+        result = await self.db.reports.delete_one({"_id": report_id, "userId": ObjectId(user_id)})
+        if result.deleted_count == 0:
+            raise KeyError("Report not found")
+
+    # Price and indicator alerts
+    async def list_watch_alerts(self, user_id: str | None = None) -> list[dict[str, Any]]:
+        query = {"userId": ObjectId(user_id)} if user_id else {}
+        cursor = self.db.watch_alerts.find(query).sort("createdAt", -1)
+        return serialize_mongo_doc(await cursor.to_list(length=5000))
+
+    async def add_watch_alert(self, user_id: str, payload: WatchAlertInput) -> dict[str, Any]:
+        if await self.db.watch_alerts.count_documents({"userId": ObjectId(user_id)}) >= MAX_WATCH_ALERTS:
+            raise ValueError(f"You can have up to {MAX_WATCH_ALERTS} alerts; delete one first")
+        doc = {"userId": ObjectId(user_id), **payload.model_dump(), "createdAt": now()}
+        doc["symbol"] = doc["symbol"].upper()
+        result = await self.db.watch_alerts.insert_one(doc)
+        return serialize_mongo_doc(doc | {"_id": result.inserted_id})
+
+    async def delete_watch_alert(self, user_id: str, alert_id: str) -> None:
+        result = await self.db.watch_alerts.delete_one({"_id": _object_id(alert_id), "userId": ObjectId(user_id)})
+        if result.deleted_count == 0:
+            raise KeyError("Alert not found")
+
+    async def mark_watch_alert(self, alert_id: str, key: str) -> None:
+        await self.db.watch_alerts.update_one({"_id": _object_id(alert_id)}, {"$set": {"lastAlert": key}})
+
 
 class InMemoryStore:
     """Ephemeral store for local development and demos (USE_IN_MEMORY_DB=true). Data resets on restart.
@@ -334,6 +400,8 @@ class InMemoryStore:
         self.custom_strategies: dict[str, dict[str, Any]] = {}
         self.logins: list[dict[str, Any]] = []
         self.alerts: dict[str, dict[str, Any]] = {}
+        self.reports: dict[str, dict[str, Any]] = {}
+        self.watch_alerts: dict[str, dict[str, Any]] = {}
 
     async def close(self) -> None:
         return None
@@ -518,6 +586,62 @@ class InMemoryStore:
         async with self.lock:
             if sim_id in self.simulations:
                 self.simulations[sim_id]["lastAlert"] = key
+
+    async def create_report(self, user: dict[str, Any], title: str, content: dict[str, Any]) -> dict[str, Any]:
+        record = {
+            "id": secrets.token_urlsafe(8),
+            "userId": user["id"],
+            "author": _first_name(user),
+            "title": title,
+            "createdAt": now().isoformat(),
+            "content": content,
+        }
+        async with self.lock:
+            self.reports[record["id"]] = record
+        return _report_summary(record)
+
+    async def get_report(self, report_id: str) -> dict[str, Any] | None:
+        async with self.lock:
+            record = self.reports.get(report_id)
+        return dict(record) if record else None
+
+    async def list_reports(self, user_id: str) -> list[dict[str, Any]]:
+        async with self.lock:
+            mine = [_report_summary(r) for r in self.reports.values() if r["userId"] == user_id]
+        return sorted(mine, key=lambda r: r["createdAt"], reverse=True)[:MAX_REPORTS]
+
+    async def delete_report(self, user_id: str, report_id: str) -> None:
+        async with self.lock:
+            record = self.reports.get(report_id)
+            if not record or record["userId"] != user_id:
+                raise KeyError("Report not found")
+            self.reports.pop(report_id)
+
+    async def list_watch_alerts(self, user_id: str | None = None) -> list[dict[str, Any]]:
+        async with self.lock:
+            rows = [dict(a) for a in self.watch_alerts.values() if user_id is None or a["userId"] == user_id]
+        return sorted(rows, key=lambda a: a["createdAt"], reverse=True)
+
+    async def add_watch_alert(self, user_id: str, payload: WatchAlertInput) -> dict[str, Any]:
+        async with self.lock:
+            if sum(1 for a in self.watch_alerts.values() if a["userId"] == user_id) >= MAX_WATCH_ALERTS:
+                raise ValueError(f"You can have up to {MAX_WATCH_ALERTS} alerts; delete one first")
+            record = {"id": uuid.uuid4().hex, "userId": user_id, **payload.model_dump(), "createdAt": now().isoformat()}
+            record["symbol"] = record["symbol"].upper()
+            self.watch_alerts[record["id"]] = record
+            return dict(record)
+
+    async def delete_watch_alert(self, user_id: str, alert_id: str) -> None:
+        async with self.lock:
+            record = self.watch_alerts.get(alert_id)
+            if not record or record["userId"] != user_id:
+                raise KeyError("Alert not found")
+            self.watch_alerts.pop(alert_id)
+
+    async def mark_watch_alert(self, alert_id: str, key: str) -> None:
+        async with self.lock:
+            if alert_id in self.watch_alerts:
+                self.watch_alerts[alert_id]["lastAlert"] = key
 
 
 Store = MongoStore | InMemoryStore

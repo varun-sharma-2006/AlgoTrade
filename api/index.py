@@ -17,6 +17,9 @@ os.environ.setdefault("USE_IN_MEMORY_DB", "false" if os.getenv("MONGO_URL") else
 from fastapi import FastAPI  # noqa: E402
 
 from backend.main import app as backend_app  # noqa: E402
+from backend.routes.reports import share_page  # noqa: E402
 
 app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
+# vercel.json rewrites /r/<id> here: the app's page with link-preview tags for a shared report.
+app.add_api_route("/r/{report_id}", share_page, methods=["GET"], include_in_schema=False)
 app.mount("/api", backend_app)

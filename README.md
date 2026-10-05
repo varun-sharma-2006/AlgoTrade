@@ -31,6 +31,12 @@ machine-learning strategy that is trained only on the past, and ask the trading 
   borrow fee for every day the short is held.
 - **Indian markets**: NSE/BSE stocks (`.NS`, `.BO`) pay real delivery charges (STT, stamp duty on buys, exchange
   and SEBI fees, GST) instead of the flat fee, are compared with the NIFTY 50, and are shown in rupees.
+- **After-tax returns**: Indian STCG/LTCG (with the ₹1.25 lakh exemption, cess, set-off and carry-forward), a flat
+  30% on Indian crypto, or US short/long-term rates, worked out per tax year from the closed trades.
+- **Hourly bars and crypto**: backtest on hourly data (the last two years) or crypto pairs such as `BTC-USD`, with
+  ratios annualised correctly for intraday and 24/7 markets.
+- **Market impact**: optional square-root-law costs that grow with order size relative to the stock's traded value,
+  and a split of returns into overnight gaps vs the trading session.
 - **Risk analytics**: total and annualised return, volatility, Sharpe, Sortino, max drawdown and Calmar for the
   strategy, buy & hold and the index side by side (net of a configurable risk-free rate), plus beta, alpha and
   correlation to the index, 1-day VaR and CVaR, profit factor, turnover, win rate, time in market, a growth-of-$1
@@ -40,6 +46,23 @@ machine-learning strategy that is trained only on the past, and ask the trading 
   heatmap shows whether nearby settings also work; the **deflated Sharpe ratio** corrects for how many settings were
   tried; and the **probability of backtest overfitting** (combinatorially symmetric cross-validation) shows how often
   the in-sample winner falls into the bottom half out of sample.
+- **More robustness evidence**: a random-entry baseline (the same trades at random times), a 60/40 portfolio
+  comparison and Fama-French five-factor + momentum attribution (US stocks).
+- **Optimiser with guardrails**: searches nearby settings and reports the best one together with its deflated
+  Sharpe ratio, probability of overfitting and walk-forward result, so optimising can't quietly overfit.
+- **AI backtest review**: a sceptical checklist (costs, too few trades, one lucky trade, execution sensitivity,
+  overnight gaps, overfitting, factor alpha, walk-forward decay) with a verdict; Gemini adds a plain-English summary
+  written only from those findings.
+- **Shareable reports**: one click creates a public link (`/r/<id>`) with the results, robustness checks and review.
+  The server re-runs the backtest, so shared numbers can't be edited, and the link unfurls with a preview on
+  LinkedIn, X and WhatsApp.
+- **Leaderboard**: every built-in and saved strategy on the same stocks, ranked by a robustness score.
+- **SIP planner**: monthly SIP with yearly step-up vs lump sum vs a strategy-timed SIP, with XIRR and the tax due
+  if redeemed, lot by lot.
+- **Options lab**: a covered-call / cash-secured-put payoff calculator and a backtest with Black-Scholes premiums
+  modelled from realised volatility.
+- **Learn**: three interactive lessons that run live experiments (buy & hold is hard to beat, optimising fools you,
+  costs decide the result) and a first-visit tour of the app.
 - **Portfolio lab**: run one strategy on a basket of up to 30 stocks with equal, inverse-volatility or risk-parity
   weights, weekly/monthly/quarterly rebalancing and optional top-N momentum selection, then see each stock's
   result on its own: a real edge should show up on most of them, not one lucky ticker.
@@ -68,10 +91,14 @@ machine-learning strategy that is trained only on the past, and ask the trading 
 - **Daily signals and alerts**: the Portfolio page shows what each simulation's strategy says at the latest close.
   A daily job (Vercel Cron, or the included GitHub Actions workflow) emails and/or sends a Telegram message when a
   strategy signals a trade.
-- **Strategy Builder**: design your own strategy from rules such as "RSI(14) is below 30", "MACD histogram crosses
+- **Strategy Builder**: describe a strategy in plain English and get rules back (Gemini, or a built-in parser
+  offline), or design your own from rules such as "RSI(14) is below 30", "MACD histogram crosses
   above 0" or "Price crosses above Highest close(55)" (also EMA, ATR, rate of change and volume), combine entry
   rules with AND or OR, trade long or short, add a stop-loss, take-profit, trailing stop or time exit, read it back
-  in plain English, backtest it, save it, use it in simulations, and **export it to TradingView Pine Script**.
+  in plain English, backtest it, walk-forward test it, save it, use it in simulations, and **export it to
+  TradingView Pine Script** or a **Jupyter notebook** that reproduces the backtest with pandas.
+- **Price and indicator alerts**: "tell me when NVDA's RSI(14) is below 30", checked after every close.
+- **Exports and app**: trade logs as CSV, a print-friendly PDF layout, and an installable app (PWA).
 - **Sign in with Google**: Google verifies each visitor's email; an admin-only **Visitors** page lists who signed in, when and from which device, with CSV export.
 - **Runs anywhere**: an in-memory mode needs no database; MongoDB is used for persistence.
 
@@ -131,7 +158,16 @@ backend/
   robustness.py     Monte Carlo, parameter sensitivity, deflated Sharpe ratio, probability of overfitting
   basket.py         multi-stock portfolio backtests (equal / inverse-vol / risk-parity weights, rebalancing)
   costs.py          trading costs and benchmarks per market (flat fee, or NSE delivery charges)
-  alerts.py         daily trade signals and email / Telegram alerts
+  alerts.py         daily trade signals, watch alerts and email / Telegram alerts
+  tax.py            after-tax returns (India and US rules)
+  sip.py            SIP vs lump sum vs strategy-timed SIP, XIRR
+  factors.py        Fama-French five-factor + momentum attribution
+  options.py        Black-Scholes and covered-call / cash-secured-put backtests
+  review.py         the backtest review checklist and verdict
+  nlrules.py        plain English -> Strategy Builder rules
+  notebook.py       Jupyter notebook export
+  pricecache.py     daily price history cached in MongoDB
+  broker.py         Alpaca paper-order mirroring (admins)
   copilot.py        copilot tools for Gemini function calling, and the offline request parser
   rules.py          Strategy Builder rule engine (indicators, AND/OR, long/short, stops, Pine Script export)
   portfolio.py      replays simulations on real prices and totals the portfolio
@@ -234,6 +270,12 @@ override variables already set in your system environment.
 | `CRON_SECRET` | Bearer token the daily signal job (`/cron/daily`) requires; Vercel Cron sends it automatically | unset (job disabled) |
 | `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD`, `SMTP_FROM` | Email sender for trade alerts (STARTTLS) | unset |
 | `TELEGRAM_BOT_TOKEN` | Telegram bot for trade alerts; each user adds their chat id on the Portfolio page | unset |
+| `US_SHORT_TERM_TAX`, `US_LONG_TERM_TAX` | Rates used for after-tax returns on US-taxed assets | `0.24`, `0.15` |
+| `PUBLIC_URL` | The site's address, used for shared-report link previews (Vercel, Hugging Face and Render hosts are detected automatically) | unset |
+| `HEAVY_REQUESTS_PER_MINUTE` | Research runs (robustness, optimiser, review, baskets...) allowed per user per minute | `20` |
+| `CACHE_PRICES_IN_DB` | Cache daily price history in MongoDB and refresh only the latest month | `true` |
+| `SENTRY_DSN` | Send backend errors to Sentry | unset |
+| `ALPACA_KEY_ID`, `ALPACA_SECRET_KEY`, `ALPACA_BASE_URL` | Alpaca paper-trading keys: admins can mirror a simulation's trades as paper orders | unset, paper API |
 | `STATIC_DIR` | Serve a built frontend (`dist/`) from the API, for single-container deploys | unset |
 | `FRONTEND_ORIGIN` | Allowed CORS origin | `http://localhost:5173` |
 | `SESSION_DURATION_DAYS` | Session lifetime | `7` |
@@ -270,6 +312,16 @@ Interactive docs are served at `/docs`. Authenticated routes expect `Authorizati
 | `POST` | `/analytics/robustness` | Monte Carlo, parameter sensitivity, deflated Sharpe and PBO for a backtest (same body as `/analytics/train`) |
 | `POST` | `/analytics/basket` | Portfolio backtest: `{symbols, strategyId, parameters?, rules?, weighting, rebalance, topN}` |
 | `POST` | `/strategies/pine` | Export Strategy Builder rules as TradingView Pine Script |
+| `POST` | `/strategies/from-text` | Plain English -> Strategy Builder rules |
+| `POST` | `/strategies/notebook` | A Jupyter notebook that reproduces a backtest |
+| `POST` | `/analytics/optimize` | Best nearby settings, with deflated Sharpe, PBO and walk-forward guardrails |
+| `POST` | `/analytics/review` | Backtest review: findings and a verdict |
+| `POST` | `/analytics/leaderboard` | Rank strategies across symbols: `{symbols, custom?}` |
+| `POST` | `/analytics/sip` | SIP planner: `{symbol, monthly, stepUp, years, timingStrategy?}` |
+| `POST` | `/analytics/options` | Covered call / cash-secured put backtest |
+| `POST` `GET` | `/reports` | Create a shareable report (server re-runs the backtest) / list mine |
+| `GET` `DELETE` | `/reports/{id}` | Read a report (public) / delete mine |
+| `GET` `POST` `DELETE` | `/alerts/watch` | Price and indicator alerts |
 | `GET` `PUT` | `/alerts/settings` | Email / Telegram alert preferences |
 | `GET` | `/alerts/signals` | Today's signal for each active simulation |
 | `POST` | `/alerts/test` | Send a test alert |
@@ -330,6 +382,10 @@ on weekdays. Elsewhere, set the repository secret `CRON_SECRET` and variable `AP
   for splits and dividends.
 - Fractional positions are rebalanced back to their target weight daily (without cost) within a trade; volatility
   targeting only trades when the target size moves by more than 10 percentage points.
+- Option premiums are modelled (Black-Scholes on realised volatility), not historical quotes.
+- Taxes are estimates: surcharges, state taxes and personal circumstances are not modelled, and tax is subtracted
+  at the end rather than paid each year.
+- Earnings dates aren't available from the free data sources; the overnight-gap share of returns is the proxy.
 
 ## Testing
 

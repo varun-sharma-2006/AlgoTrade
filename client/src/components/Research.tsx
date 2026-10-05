@@ -1,4 +1,5 @@
 import { useId, useState } from "react";
+import { FactorTable } from "./Insights";
 import type {
   BenchmarkStats,
   ModelReport,
@@ -36,13 +37,17 @@ export function LineChart({
   format,
   height = 200,
   label,
+  xFormat,
 }: {
   dates: string[];
   series: ChartSeries[];
   format: (value: number) => string;
   height?: number;
   label: string;
+  /** Label for point i on the x axis (default: its date). */
+  xFormat?: (index: number) => string;
 }) {
+  const xLabel = (i: number) => (xFormat ? xFormat(i) : shortDate(dates[i]));
   const [hover, setHover] = useState<number | null>(null);
   const gradient = useId().replace(/:/g, "");
   const width = 800;
@@ -85,7 +90,7 @@ export function LineChart({
               ) : null}
             </span>
           ))}
-          {hover !== null ? <span className="subtle">{shortDate(dates[hover])}</span> : null}
+          {hover !== null ? <span className="subtle">{xLabel(hover)}</span> : null}
         </span>
       </figcaption>
       <svg
@@ -142,9 +147,9 @@ export function LineChart({
         ) : null}
       </svg>
       <div className="value-chart-axis">
-        <span>{shortDate(dates[0])}</span>
-        <span>{shortDate(dates[Math.floor((dates.length - 1) / 2)])}</span>
-        <span>{shortDate(dates[dates.length - 1])}</span>
+        <span>{xLabel(0)}</span>
+        <span>{xLabel(Math.floor((dates.length - 1) / 2))}</span>
+        <span>{xLabel(dates.length - 1)}</span>
       </div>
     </figure>
   );
@@ -154,7 +159,7 @@ const RISK_ROWS: Array<{ key: keyof RiskStats; label: string; hint: string; form
   { key: "totalReturn", label: "Total return", hint: "Over the whole backtest window", format: (v) => signedPct(v), better: "high" },
   { key: "annualizedReturn", label: "Annualised return", hint: "Compound yearly growth rate (CAGR)", format: (v) => signedPct(v), better: "high" },
   { key: "volatility", label: "Volatility", hint: "Annualised standard deviation of daily returns", format: (v) => pct(v, 1), better: "low" },
-  { key: "sharpe", label: "Sharpe ratio", hint: "Return per unit of volatility, annualised", format: ratio, better: "high" },
+  { key: "sharpe", label: "Sharpe ratio", hint: "Return above the risk-free rate per unit of volatility, annualised", format: ratio, better: "high" },
   { key: "sortino", label: "Sortino ratio", hint: "Like Sharpe, but only losing days count as risk", format: ratio, better: "high" },
   { key: "maxDrawdown", label: "Max drawdown", hint: "Largest fall from a peak", format: (v) => pct(v, 1), better: "low" },
   { key: "calmar", label: "Calmar ratio", hint: "Annualised return divided by max drawdown", format: ratio, better: "high" },
@@ -565,6 +570,33 @@ export function RobustnessResults({ result }: { result: RobustnessResult }) {
           ) : null}
         </ul>
       ) : null}
+
+      {result.randomEntries || result.sixtyForty ? (
+        <ul className="model-stats">
+          {result.randomEntries ? (
+            <li>
+              <span>Better than random timing?</span>
+              <strong className={verdictClass(result.randomEntries.percentile >= 0.9)}>
+                {pct(result.randomEntries.percentile, 0)}
+              </strong>
+              <small>
+                of {result.randomEntries.paths} strategies with the same {result.randomEntries.trades} trades at random times did worse
+              </small>
+            </li>
+          ) : null}
+          {result.sixtyForty ? (
+            <li>
+              <span>60/40 portfolio</span>
+              <strong>{signedPct(result.sixtyForty.totalReturn)}</strong>
+              <small>
+                stocks/bonds, rebalanced monthly · Sharpe {ratio(result.sixtyForty.sharpe)} vs strategy {ratio(result.metrics.sharpe)}
+              </small>
+            </li>
+          ) : null}
+        </ul>
+      ) : null}
+
+      {result.factors ? <FactorTable factors={result.factors} /> : null}
 
       {grid ? (
         <>

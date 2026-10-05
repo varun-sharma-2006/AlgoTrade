@@ -200,6 +200,25 @@ def period_days(period: str) -> int:
     return int(match.group(1)) * {"y": 365, "mo": 30, "d": 1}[match.group(2)]
 
 
+CRYPTO_QUOTES = ("USD", "USDT", "USDC", "EUR", "GBP", "INR", "BTC", "ETH")
+
+
+def is_crypto(symbol: str) -> bool:
+    """Yahoo crypto pairs look like BTC-USD or ETH-INR."""
+    base, _, quote = symbol.upper().partition("-")
+    return bool(base) and base.isalnum() and quote in CRYPTO_QUOTES
+
+
+def bars_per_year(timestamps: list[str], symbol: str = "") -> float:
+    """Bars in a year: trading days (252, or 365 for crypto) times the typical number of bars per day."""
+    days_per_year = 365 if is_crypto(symbol) else 252
+    counts: dict[str, int] = {}
+    for ts in timestamps[-600:]:
+        counts[ts[:10]] = counts.get(ts[:10], 0) + 1
+    per_day = sorted(counts.values())[len(counts) // 2] if counts else 1
+    return float(days_per_year * per_day)
+
+
 def efficiency_ratio(closes: list[float], window: int) -> Series:
     """Kaufman's efficiency ratio: net move over the window divided by the total distance travelled (0-1)."""
     n = len(closes)
@@ -358,6 +377,7 @@ def size_positions(
     vol_window: int = 20,
     max_leverage: float = 1.0,
     band: float = 0.1,
+    periods: float = 252,
 ) -> list[float]:
     """Turn a 1/0/-1 target into position weights.
 
@@ -378,7 +398,7 @@ def size_positions(
             previous = 0.0
             out.append(0.0)
             continue
-        vol = vols[t] * math.sqrt(252) if t >= vol_window and vols[t] else None
+        vol = vols[t] * math.sqrt(periods) if t >= vol_window and vols[t] else None
         weight = max_leverage if not vol else min(max_leverage, target_vol / vol)
         new = round(side * weight, 4)
         if previous and (previous > 0) == (new > 0) and abs(new - previous) < band:
@@ -402,17 +422,23 @@ def simulate(
     fills: dict[int, float] | None = None,
     sell_cost_bps: float | None = None,
     borrow_bps: float = 0.0,
+    periods: float = 252,
+    impact: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Trade `target` weights over bars start..end (inclusive), starting with `value` and position `held`.
 
     With execution="close", the position decided at a bar's close is taken at that close. With "next_open"
     (and `opens` given) it is taken at the next bar's open. `fills` are intraday stop exits {bar: price}.
     Buys pay `cost_bps` and sells `sell_cost_bps` (default: the same) on the traded value; shorts pay
-    `borrow_bps` a year while held.
+    `borrow_bps` a year while held (`periods` bars a year).
+
+    `impact` adds a market-impact cost that grows with the order's size relative to the stock's average
+    traded value (the square-root law): coefficient x volatility x sqrt(order / average daily value). It needs
+    {"capital", "adv": [...], "vol": [...], "coefficient"}, with ADV and volatility known before each bar.
     """
     buy_rate = cost_bps / 10_000
     sell_rate = (cost_bps if sell_cost_bps is None else sell_cost_bps) / 10_000
-    borrow = borrow_bps / 10_000 / 252
+    borrow = borrow_bps / 10_000 / periods
     use_open = execution == "next_open" and opens is not None
     held = float(held)
     equity: list[float] = []
@@ -426,13 +452,26 @@ def simulate(
     )
     days_in_market = 0
     turnover = 0.0
+    impact_cost = 0.0
+    max_participation = 0.0
+    overnight = intraday = 0.0  # price moves earned while holding: open vs previous close, and close vs open
 
     def trade(t: int, new: float, price: float) -> None:
-        nonlocal value, held, entry, turnover
+        nonlocal value, held, entry, turnover, impact_cost, max_participation
         new = float(new)
         if new == held:
             return
         before, was = value, held
+        if impact:
+            adv, vol = impact["adv"][t], impact["vol"][t]
+            if adv and vol:
+                order = abs(new - was) * value * impact["capital"]
+                participation = order / adv
+                max_participation = max(max_participation, participation)
+                rate = min(impact["coefficient"] * vol * math.sqrt(participation), 0.05)
+                paid = value * abs(new - was) * rate
+                value -= paid
+                impact_cost += paid
         if held and (new == 0 or (new > 0) != (held > 0)):  # close the open trade (or the first leg of a flip)
             value *= 1 - abs(held) * (sell_rate if held > 0 else buy_rate)
             if entry is not None:
@@ -456,11 +495,17 @@ def simulate(
         if t > start:
             if use_open:
                 if held:
+                    overnight += held * (opens[t] / closes[t - 1] - 1)
                     value *= 1 + held * (opens[t] / closes[t - 1] - 1)
                 trade(t, target[t - 1], opens[t])
                 reference = opens[t]
+                if held:
+                    intraday += held * (closes[t] / opens[t] - 1)
             else:
                 reference = closes[t - 1]
+                if held and opens is not None:
+                    overnight += held * (opens[t] / closes[t - 1] - 1)
+                    intraday += held * (closes[t] / opens[t] - 1)
             if held:
                 days_in_market += 1
                 short = held < 0
@@ -487,6 +532,10 @@ def simulate(
         "daysInMarket": days_in_market,
         "turnover": turnover,
         "fills": log,
+        "impactCost": impact_cost,
+        "maxParticipation": max_participation,
+        "overnight": overnight,
+        "intraday": intraday,
     }
 
 
@@ -510,8 +559,14 @@ def backtest(
     sell_fee_bps: float | None = None,
     risk_free: float = 0.0,
     market_closes: Series | None = None,
+    periods: float = 252,
+    impact: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Backtest bars start..end. Bars before `start` only warm up indicators; the money starts in cash."""
+    """Backtest bars start..end. Bars before `start` only warm up indicators; the money starts in cash.
+
+    `periods` is the number of bars in a year (252 for daily stock data). `impact` turns on market-impact
+    costs: {"capital": starting capital in the stock's currency, "coefficient": 0.5}.
+    """
     from backend import risk
 
     planned = plan(
@@ -532,6 +587,7 @@ def backtest(
         fraction=float(sizing.get("fraction", 1.0)),
         target_vol=float(sizing.get("targetVol", 0.15)),
         max_leverage=float(sizing.get("maxLeverage", 1.0)),
+        periods=periods,
     )
     opens = (bars or {}).get("open")
     if opens is not None and any(o is None for o in opens):
@@ -550,6 +606,8 @@ def backtest(
         execution=execution,
         fills=planned["fills"],
         borrow_bps=borrow_bps,
+        periods=periods,
+        impact=impact_inputs(closes, bars, impact) if impact else None,
     )
     equity = run["equity"]
     trades = [_trade(tr, timestamps) for tr in run["trades"]]
@@ -560,13 +618,14 @@ def backtest(
     )
 
     # Measured from the starting capital (1.0), so a cost paid on the first bar counts.
-    stats = risk.summary(run["dailyReturns"], [1.0, *equity], risk_free)
-    stats["annualizedReturn"] = risk.annualise(stats["totalReturn"], max(last - start, 1))
+    stats = risk.summary(run["dailyReturns"], [1.0, *equity], risk_free, periods)
+    stats["annualizedReturn"] = risk.annualise(stats["totalReturn"], max(last - start, 1), periods)
     buy_hold_equity = [closes[t] / closes[start] for t in range(start, last + 1)]
     buy_hold = risk.summary(
         [buy_hold_equity[k] / buy_hold_equity[k - 1] - 1 for k in range(1, len(buy_hold_equity))],
         buy_hold_equity,
         risk_free,
+        periods,
     )
     trade_returns = [tr["return"] for tr in trades]
     wins = [r for r in trade_returns if r > 0]
@@ -587,7 +646,13 @@ def backtest(
         "exposure": run["daysInMarket"] / days,
         "avgGrossExposure": sum(abs(w) for w in window) / len(window) if window else 0.0,
         # Traded value per year as a multiple of equity (1.0 = the whole portfolio turned over once a year).
-        "turnover": run["turnover"] / days * risk.TRADING_DAYS,
+        "turnover": run["turnover"] / days * periods,
+        "periodsPerYear": periods,
+        # Price moves earned while invested, split into overnight gaps and the trading session (needs opens).
+        "overnightReturn": run["overnight"] if opens is not None else None,
+        "intradayReturn": run["intraday"] if opens is not None else None,
+        "impactCost": run["impactCost"] if impact else None,
+        "maxParticipation": run["maxParticipation"] if impact else None,
         "feeBps": fee_bps,
         "sellFeeBps": fee_bps if sell_fee_bps is None else sell_fee_bps,
         "slippageBps": slippage_bps,
@@ -599,18 +664,18 @@ def backtest(
     }
 
     bench_symbol, bench_name = benchmark_info or (risk.BENCHMARK_SYMBOL, risk.BENCHMARK_NAME)
+    intraday = periods > 400  # several bars a day: compare with the daily index on daily closes
+    curve_ts, curve = risk.daily_closes(timestamps[start:], equity) if intraday else (timestamps[start:], equity)
     index = (
-        risk.benchmark(
-            timestamps[start:], equity, *benchmark, symbol=bench_symbol, name=bench_name, risk_free=risk_free
-        )
+        risk.benchmark(curve_ts, curve, *benchmark, symbol=bench_symbol, name=bench_name, risk_free=risk_free)
         if benchmark
         else None
     )
     drawdown = risk.drawdowns(equity)
     buy_hold_drawdown = risk.drawdowns(buy_hold_equity)
-    rolling_sharpe = risk.rolling_sharpe(run["dailyReturns"], 126, risk_free)
+    rolling_sharpe = risk.rolling_sharpe(run["dailyReturns"], max(int(periods / 2), 20), risk_free, periods)
     rolling_beta: list[float | None] = [None] * len(equity)
-    if index:
+    if index and not intraday:
         rolling_beta = risk.rolling_beta(run["dailyReturns"], risk.aligned_returns(timestamps[start:], *benchmark))
     regime = planned.get("regime")
     sample = []
@@ -641,6 +706,41 @@ def backtest(
         "monthly": risk.monthly_returns(timestamps[start:], equity, 1.0),
         "dailyReturns": run["dailyReturns"],
         "period": {"start": timestamps[start], "end": timestamps[last], "days": last - start + 1},
+        # Every closed trade's profit in units of starting capital, for tax and review (not sent to clients).
+        "_trades": [
+            {
+                "entryDate": timestamps[tr["entryIndex"]],
+                "exitDate": timestamps[tr["exitIndex"]],
+                "gain": tr["exitValue"] - tr["entryValue"],
+                "side": "long" if tr["side"] > 0 else "short",
+                "bars": tr["exitIndex"] - tr["entryIndex"],
+            }
+            for tr in run["trades"]
+        ],
+        "_finalEquity": equity[-1],
+    }
+
+
+def impact_inputs(closes: list[float], bars: Bars | None, impact: dict[str, Any]) -> dict[str, Any] | None:
+    """Average traded value and return volatility over the 20 bars before each bar, for market impact."""
+    volume = (bars or {}).get("volume")
+    if not volume or any(v is None for v in volume[-60:]):
+        return None
+    n, window = len(closes), 20
+    traded = [closes[i] * float(volume[i] or 0) for i in range(n)]
+    returns = [0.0] + [closes[i] / closes[i - 1] - 1 for i in range(1, n)]
+    adv: list[float | None] = [None] * n
+    vol: list[float | None] = [None] * n
+    for i in range(window + 1, n):
+        adv[i] = sum(traded[i - window : i]) / window or None
+        chunk = returns[i - window : i]
+        m = sum(chunk) / window
+        vol[i] = math.sqrt(sum((r - m) ** 2 for r in chunk) / (window - 1))
+    return {
+        "capital": float(impact.get("capital", 100_000)),
+        "coefficient": float(impact.get("coefficient", 0.5)),
+        "adv": adv,
+        "vol": vol,
     }
 
 

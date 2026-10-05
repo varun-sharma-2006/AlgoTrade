@@ -29,6 +29,18 @@ import type {
   AlertSettings,
   AlertSettingsResponse,
   DailySignal,
+  OptimizeResult,
+  ReviewResult,
+  LeaderboardResult,
+  SipPayload,
+  SipResult,
+  OptionsPayload,
+  OptionsResult,
+  ReportSummary,
+  SharedReport,
+  TextRulesResult,
+  WatchAlert,
+  Condition,
 } from "./types";
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
@@ -280,4 +292,72 @@ export function fetchChart(token: string, symbol: string, options?: { range?: st
   const query = params.toString();
   const path = `/market/chart/${encodeURIComponent(symbol)}${query ? `?${query}` : ""}`;
   return request<ChartResponse>(path, { token });
+}
+
+export function optimizeStrategy(token: string, payload: TrainingPayload) {
+  return request<OptimizeResult>("/analytics/optimize", { method: "POST", body: payload, token });
+}
+
+export function reviewBacktest(token: string, payload: RobustnessPayload) {
+  return request<ReviewResult>("/analytics/review", { method: "POST", body: payload, token });
+}
+
+export function runLeaderboard(token: string, symbols: string[], custom: Array<{ name: string; rules: StrategyRules }>) {
+  return request<LeaderboardResult>("/analytics/leaderboard", { method: "POST", body: { symbols, custom }, token });
+}
+
+export function runSip(token: string, payload: SipPayload) {
+  return request<SipResult>("/analytics/sip", { method: "POST", body: payload, token });
+}
+
+export function runOptions(token: string, payload: OptionsPayload) {
+  return request<OptionsResult>("/analytics/options", { method: "POST", body: payload, token });
+}
+
+export function rulesFromText(token: string, text: string) {
+  return request<TextRulesResult>("/strategies/from-text", { method: "POST", body: { text }, token });
+}
+
+export function exportNotebook(token: string, payload: TrainingPayload) {
+  return request<Record<string, unknown>>("/strategies/notebook", { method: "POST", body: payload, token });
+}
+
+export function createReport(token: string, payload: RobustnessPayload & { title?: string; includeRobustness?: boolean }) {
+  return request<ReportSummary>("/reports", { method: "POST", body: payload, token });
+}
+
+export function fetchMyReports(token: string) {
+  return request<ReportSummary[]>("/reports", { token });
+}
+
+export function fetchReport(id: string) {
+  return request<SharedReport>("/reports/" + encodeURIComponent(id));
+}
+
+export function deleteReport(token: string, id: string) {
+  return request<void>("/reports/" + encodeURIComponent(id), { method: "DELETE", token });
+}
+
+export function fetchWatchAlerts(token: string) {
+  return request<WatchAlert[]>("/alerts/watch", { token });
+}
+
+export function addWatchAlert(token: string, payload: { symbol: string; condition: Condition; note?: string }) {
+  return request<WatchAlert>("/alerts/watch", { method: "POST", body: payload, token });
+}
+
+export function deleteWatchAlert(token: string, id: string) {
+  return request<void>("/alerts/watch/" + encodeURIComponent(id), { method: "DELETE", token });
+}
+
+/** Save JSON or text as a file download in the browser. */
+export function downloadFile(name: string, contents: string, type = "application/json") {
+  const url = URL.createObjectURL(new Blob([contents], { type }));
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = name;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
 }

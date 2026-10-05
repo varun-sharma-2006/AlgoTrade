@@ -4,7 +4,7 @@ import pytest
 from fastapi.testclient import TestClient
 from mongomock_motor import AsyncMongoMockClient
 
-from backend import main, stores
+from backend import deps, main, stores
 from backend.config import settings
 from backend.routes import analytics
 from backend.stores import InMemoryStore, MongoStore
@@ -28,5 +28,6 @@ def client(request, monkeypatch):
     monkeypatch.setattr(stores, "create_store", lambda: store)
     monkeypatch.setattr(analytics, "fetch_chart", fake_chart)
     monkeypatch.setattr(settings, "enable_dev_endpoints", True)
+    deps._heavy_hits.clear()  # the research rate limit is per user and would carry over between tests
     with TestClient(main.app) as test_client:
         yield test_client

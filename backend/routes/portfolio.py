@@ -45,6 +45,7 @@ def _position(
         "startingCapital": float(sim["startingCapital"]),
         "currency": currency,
         "baseCurrency": settings.base_currency,
+        "brokerMirror": bool(sim.get("brokerMirror")),
     }
     if not chart or not chart.get("points"):
         return base | {"value": base["startingCapital"], "pnl": 0.0, "pnlPct": 0.0, "error": "No price data"}

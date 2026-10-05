@@ -24,19 +24,33 @@ GST_RATE = 0.18
 BENCHMARKS = {
     "US": ("^GSPC", "S&P 500"),
     "IN": ("^NSEI", "NIFTY 50"),
+    "CRYPTO": ("BTC-USD", "Bitcoin"),
 }
 
 
 def market(symbol: str) -> str:
-    """Market of a symbol: IN for NSE/BSE listings and Indian indices, US otherwise."""
+    """Market of a symbol: CRYPTO for crypto pairs, IN for NSE/BSE listings and Indian indices, US otherwise."""
+    from backend.strategies import is_crypto
+
     upper = symbol.upper()
+    if is_crypto(upper):
+        return "CRYPTO"
     if upper.endswith((".NS", ".BO")) or upper in {"^NSEI", "^BSESN", "^NSEBANK"}:
         return "IN"
     return "US"
 
 
+def tax_region(symbol: str, base_currency: str = "USD") -> tuple[str, bool]:
+    """Which capital-gains rules apply: Indian rules for NSE/BSE stocks and for crypto held by an INR-based
+    investor, US rules otherwise; and whether the asset is crypto."""
+    kind = market(symbol)
+    if kind == "CRYPTO":
+        return ("IN" if base_currency.upper() == "INR" or symbol.upper().endswith("-INR") else "US"), True
+    return ("IN" if kind == "IN" else "US"), False
+
+
 def benchmark_for(symbol: str) -> tuple[str, str]:
-    """The index a symbol is compared with: NIFTY 50 for Indian stocks, the S&P 500 otherwise."""
+    """The index a symbol is compared with: NIFTY 50 for Indian stocks, Bitcoin for crypto, the S&P 500 otherwise."""
     return BENCHMARKS[market(symbol)]
 
 

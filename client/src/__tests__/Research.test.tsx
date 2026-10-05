@@ -177,6 +177,8 @@ describe("Strategy lab extras", () => {
       horizon: 5,
       threshold: 0.55,
       trainWindow: 504,
+      interval: "1d",
+      marketImpact: false,
       execution: "next_open",
       sizing: "full",
       sizeFraction: 0.5,

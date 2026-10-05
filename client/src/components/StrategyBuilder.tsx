@@ -1,5 +1,17 @@
 import { useState, type FormEvent } from "react";
-import type { Condition, ConditionOp, CustomStrategy, Operand, OperandKind, StrategyRules, TrainingResult } from "../types";
+import { downloadFile } from "../api";
+import type {
+  Condition,
+  ConditionOp,
+  CustomStrategy,
+  Operand,
+  OperandKind,
+  StrategyRules,
+  TextRulesResult,
+  TrainingResult,
+  WalkForwardResult,
+} from "../types";
+import { WalkForwardResults } from "./Research";
 import { BacktestResults } from "./StrategyTrainer";
 
 interface StrategyBuilderProps {
@@ -8,6 +20,9 @@ interface StrategyBuilderProps {
   onSave: (name: string, description: string, rules: StrategyRules) => Promise<void>;
   onDelete: (id: string) => Promise<void>;
   onExportPine?: (name: string, rules: StrategyRules) => Promise<string>;
+  onFromText?: (text: string) => Promise<TextRulesResult>;
+  onWalkForward?: (symbol: string, rules: StrategyRules) => Promise<WalkForwardResult>;
+  onNotebook?: (symbol: string, rules: StrategyRules) => Promise<Record<string, unknown>>;
 }
 
 const MAX_CONDITIONS = 5;
@@ -45,7 +60,7 @@ const PERIOD_LABELS: Partial<Record<OperandKind, string>> = {
   volume_sma: "Volume SMA",
 };
 
-const OPS: Array<{ op: ConditionOp; label: string }> = [
+export const OPS: Array<{ op: ConditionOp; label: string }> = [
   { op: ">", label: "is above" },
   { op: "<", label: "is below" },
   { op: "crosses_above", label: "crosses above" },
@@ -160,7 +175,7 @@ export function describeRules(rules: StrategyRules): string {
   return `${open}; ${close}.`;
 }
 
-function OperandPicker({ value, onChange, label }: { value: Operand; onChange: (next: Operand) => void; label: string }) {
+export function OperandPicker({ value, onChange, label }: { value: Operand; onChange: (next: Operand) => void; label: string }) {
   return (
     <div className="operand">
       <select
@@ -264,7 +279,16 @@ function ConditionList({
   );
 }
 
-export function StrategyBuilder({ saved, onBacktest, onSave, onDelete, onExportPine }: StrategyBuilderProps) {
+export function StrategyBuilder({
+  saved,
+  onBacktest,
+  onSave,
+  onDelete,
+  onExportPine,
+  onFromText,
+  onWalkForward,
+  onNotebook,
+}: StrategyBuilderProps) {
   const [name, setName] = useState(PRESETS[0].name);
   const [description, setDescription] = useState(PRESETS[0].description);
   const [rules, setRules] = useState<StrategyRules>(PRESETS[0].rules);
@@ -274,6 +298,44 @@ export function StrategyBuilder({ saved, onBacktest, onSave, onDelete, onExportP
   const [message, setMessage] = useState<{ kind: "error" | "ok"; text: string } | null>(null);
   const [pine, setPine] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [englishText, setEnglishText] = useState("");
+  const [described, setDescribed] = useState<string | null>(null);
+  const [walkForward, setWalkForward] = useState<WalkForwardResult | null>(null);
+  const [extraBusy, setExtraBusy] = useState<string | null>(null);
+
+  const buildFromText = async () => {
+    if (!onFromText || englishText.trim().length < 5) return;
+    setExtraBusy("text");
+    setMessage(null);
+    try {
+      const result = await onFromText(englishText.trim());
+      setRules({ ...result.rules, exit: result.rules.exit ?? [] });
+      setName(englishText.trim().slice(0, 60));
+      setResult(null);
+      setDescribed(
+        `${result.source === "gemini" ? "Built by AI" : "Built by the offline parser"}. Check the rules below before backtesting.${
+          result.notes ? ` ${result.notes}` : ""
+        }`,
+      );
+    } catch (error) {
+      setDescribed(null);
+      setMessage({ kind: "error", text: error instanceof Error ? error.message : "Couldn't build rules from that." });
+    } finally {
+      setExtraBusy(null);
+    }
+  };
+
+  const runExtra = async (name: string, action: () => Promise<void>) => {
+    setExtraBusy(name);
+    setMessage(null);
+    try {
+      await action();
+    } catch (error) {
+      setMessage({ kind: "error", text: error instanceof Error ? error.message : `The ${name} failed.` });
+    } finally {
+      setExtraBusy(null);
+    }
+  };
 
   const load = (preset: { name: string; description?: string | null; rules: StrategyRules }) => {
     setName(preset.name);
@@ -382,6 +444,31 @@ export function StrategyBuilder({ saved, onBacktest, onSave, onDelete, onExportP
           </p>
         </div>
       </header>
+
+      {onFromText ? (
+        <div className="panel describe-panel">
+          <label>
+            <span>Describe a strategy in plain English</span>
+            <textarea
+              rows={2}
+              maxLength={1000}
+              placeholder="e.g. Buy when RSI(14) is below 30 and price is above the 200-day average; sell when RSI is above 70, 8% stop-loss"
+              value={englishText}
+              onChange={(event) => setEnglishText(event.target.value)}
+            />
+          </label>
+          <div className="actions">
+            <button
+              type="button"
+              disabled={extraBusy !== null || englishText.trim().length < 5}
+              onClick={() => void buildFromText()}
+            >
+              {extraBusy === "text" ? "Building..." : "Build rules"}
+            </button>
+            {described ? <span className="subtle">{described}</span> : null}
+          </div>
+        </div>
+      ) : null}
 
       <div className="preset-row">
         <span className="hint">Start from a preset:</span>
@@ -498,6 +585,32 @@ export function StrategyBuilder({ saved, onBacktest, onSave, onDelete, onExportP
                 {busy === "pine" ? "Exporting…" : "Export to TradingView"}
               </button>
             ) : null}
+            {onWalkForward ? (
+              <button
+                type="button"
+                className="button-ghost"
+                disabled={extraBusy !== null}
+                title="Tune scaled versions of these rules on each past year and trade them on the next quarter"
+                onClick={() => void runExtra("walk-forward test", async () => setWalkForward(await onWalkForward(symbol, clean())))}
+              >
+                {extraBusy === "walk-forward test" ? "Testing…" : "Walk-forward test"}
+              </button>
+            ) : null}
+            {onNotebook ? (
+              <button
+                type="button"
+                className="button-ghost"
+                disabled={extraBusy !== null}
+                onClick={() =>
+                  void runExtra("notebook export", async () => {
+                    const nb = await onNotebook(symbol, clean());
+                    downloadFile(`${symbol}-custom-strategy.ipynb`, JSON.stringify(nb, null, 1));
+                  })
+                }
+              >
+                Notebook
+              </button>
+            ) : null}
           </div>
 
           {pine ? (
@@ -525,6 +638,7 @@ export function StrategyBuilder({ saved, onBacktest, onSave, onDelete, onExportP
             ) : (
               <p className="empty">Run a backtest to see how your rules would have traded.</p>
             )}
+            {walkForward ? <WalkForwardResults result={walkForward} /> : null}
           </div>
 
           <div className="panel">

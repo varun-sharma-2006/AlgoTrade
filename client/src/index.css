@@ -2902,3 +2902,387 @@ label.checkbox span {
   grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
   align-items: end;
 }
+
+/* ---------- Round 2: tax, review, optimiser, share, new pages, tour, report page, print ---------- */
+
+.insight-card {
+  display: grid;
+  gap: 0.75rem;
+  padding: 1.1rem 1.2rem;
+  border-radius: var(--radius);
+  background: rgba(0, 0, 0, 0.2);
+  border: 1px solid var(--line-gold);
+}
+
+.insight-card header {
+  display: grid;
+  gap: 0.25rem;
+}
+
+.insight-card header strong {
+  font-family: var(--font-display);
+  font-size: 1.25rem;
+}
+
+.insight-card header strong small {
+  font-family: var(--font-sans);
+  font-size: 0.8rem;
+}
+
+.verdict {
+  display: grid;
+  gap: 0.25rem;
+  padding: 0.9rem 1rem;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--line);
+  background: rgba(0, 0, 0, 0.25);
+}
+
+.verdict strong {
+  font-family: var(--font-display);
+  font-size: 1.35rem;
+}
+
+.verdict-good {
+  border-color: rgba(95, 212, 154, 0.5);
+}
+
+.verdict-good strong {
+  color: var(--up);
+}
+
+.verdict-warn {
+  border-color: var(--line-gold-strong);
+}
+
+.verdict-warn strong {
+  color: var(--gold-light);
+}
+
+.verdict-bad {
+  border-color: rgba(240, 122, 122, 0.55);
+}
+
+.verdict-bad strong {
+  color: var(--down);
+}
+
+.findings {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.5rem;
+}
+
+.findings li {
+  display: grid;
+  grid-template-columns: 1.6rem 1fr;
+  gap: 0.6rem;
+  align-items: start;
+  padding: 0.65rem 0.8rem;
+  border-radius: var(--radius-sm);
+  background: rgba(0, 0, 0, 0.2);
+  border: 1px solid var(--line);
+  font-size: 0.86rem;
+}
+
+.findings li > div {
+  display: grid;
+  gap: 0.15rem;
+}
+
+.findings li > div span {
+  color: var(--text-muted);
+}
+
+.findings i {
+  font-style: normal;
+  font-weight: 700;
+  width: 1.6rem;
+  height: 1.6rem;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-size: 0.8rem;
+}
+
+.finding-good i {
+  background: rgba(95, 212, 154, 0.18);
+  color: var(--up);
+}
+
+.finding-warn i {
+  background: rgba(212, 175, 106, 0.18);
+  color: var(--gold-light);
+}
+
+.finding-bad i {
+  background: rgba(240, 122, 122, 0.18);
+  color: var(--down);
+}
+
+.factor-table {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.share-box {
+  display: grid;
+  gap: 0.5rem;
+  padding: 0.9rem 1rem;
+  border-radius: var(--radius);
+  border: 1px solid var(--line-gold-strong);
+  background: rgba(212, 175, 106, 0.06);
+}
+
+.share-row {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.share-row input {
+  flex: 1 1 260px;
+  font-variant-numeric: tabular-nums;
+}
+
+a.link-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.6rem 1.1rem;
+  border-radius: 999px;
+  border: 1px solid var(--line-gold);
+  color: var(--gold-light);
+  text-decoration: none;
+  font-weight: 600;
+}
+
+a.link-button:hover {
+  background: var(--hover);
+}
+
+.tool-actions {
+  padding-top: 0.25rem;
+  border-top: 1px dashed var(--line);
+}
+
+.tool-actions button {
+  font-size: 0.82rem;
+  padding: 0.45rem 0.8rem;
+}
+
+.describe-panel {
+  display: grid;
+  gap: 0.75rem;
+  margin-bottom: 1.25rem;
+}
+
+.describe-panel textarea {
+  resize: vertical;
+}
+
+.wide-grid {
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  align-items: end;
+}
+
+.sip-planner > form,
+.options-lab > form,
+.options-lab > .panel,
+.sip-planner > .panel,
+.leaderboard > form,
+.leaderboard > .panel {
+  display: grid;
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+}
+
+.sip-planner .stats-grid {
+  margin-bottom: 1.5rem;
+}
+
+.leaderboard-table tr.clickable {
+  cursor: pointer;
+}
+
+.chip-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  padding: 0.3rem 0;
+}
+
+.result-chip {
+  font-size: 0.78rem;
+  padding: 0.3rem 0.6rem;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: rgba(0, 0, 0, 0.25);
+}
+
+.learn {
+  display: grid;
+  gap: 1.5rem;
+}
+
+.lesson {
+  display: grid;
+  gap: 0.9rem;
+}
+
+.lesson header h2 {
+  margin: 0.2rem 0 0;
+  font-family: var(--font-display);
+}
+
+.lesson-body p {
+  margin: 0;
+  color: var(--text-muted);
+  line-height: 1.6;
+  max-width: 70ch;
+}
+
+.tour-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: grid;
+  place-items: end center;
+  padding: 1.25rem;
+  background: rgba(4, 5, 8, 0.45);
+  backdrop-filter: blur(2px);
+}
+
+.tour-card {
+  width: min(520px, 100%);
+  display: grid;
+  gap: 0.6rem;
+  padding: 1.4rem 1.5rem;
+  border-radius: var(--radius-lg);
+  background: var(--surface-solid);
+  border: 1px solid var(--line-gold-strong);
+  box-shadow: var(--shadow-lg);
+}
+
+.tour-card h2 {
+  margin: 0;
+  font-family: var(--font-display);
+}
+
+.tour-card p {
+  margin: 0 0 0.4rem;
+  color: var(--text-muted);
+  line-height: 1.6;
+}
+
+.watch-panel {
+  display: grid;
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+}
+
+.watch-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.watch-form > input:first-child {
+  width: 8rem;
+  flex: none;
+}
+
+.watch-form > input[aria-label="Alert note"] {
+  flex: 1 1 160px;
+  width: auto;
+}
+
+.watch-form .operand {
+  display: flex;
+  gap: 0.35rem;
+}
+
+.watch-form select {
+  width: auto;
+}
+
+.mirror-toggle {
+  grid-column: 1 / -1;
+  min-height: 0;
+}
+
+.report-page {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 1.25rem 16px 3rem;
+}
+
+.report-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+  padding-bottom: 1rem;
+  margin-bottom: 1rem;
+  border-bottom: 1px solid var(--line);
+}
+
+.report-header .brand-row {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  color: var(--text);
+  text-decoration: none;
+  font-family: var(--font-display);
+  font-size: 1.15rem;
+}
+
+.report-body {
+  display: grid;
+  gap: 1.25rem;
+}
+
+.report-body > .panel {
+  display: grid;
+  gap: 1rem;
+}
+
+.report-cta h2 {
+  margin: 0;
+  font-family: var(--font-display);
+}
+
+@media print {
+  body {
+    background: #fff !important;
+    color: #000;
+  }
+
+  .sidebar,
+  .actions,
+  .tool-actions,
+  .trading-settings,
+  .tour-backdrop,
+  form label,
+  .report-header a.link-button {
+    display: none !important;
+  }
+
+  .app-shell {
+    display: block !important;
+  }
+
+  .panel,
+  .line-chart,
+  .model-report,
+  .walk-forward,
+  .insight-card {
+    break-inside: avoid;
+    box-shadow: none !important;
+    background: #fff !important;
+    color: #000;
+  }
+}

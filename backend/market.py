@@ -39,7 +39,7 @@ OFFLINE_QUOTES: dict[str, dict[str, Any]] = {
 _CLOSE_CACHE_SECONDS = 600
 _close_cache: dict[str, tuple[float, list[float]]] = {}
 _HISTORY_CACHE_SECONDS = 600
-_history_cache: dict[tuple[str, str], tuple[float, dict[str, Any]]] = {}
+_history_cache: dict[tuple[str, str, str], tuple[float, dict[str, Any]]] = {}
 STOOQ = "https://stooq.com/q/d/l/"
 STOOQ_INDICES = {"^GSPC": "^spx", "^DJI": "^dji", "^IXIC": "^ndq", "^NDX": "^ndx"}
 
@@ -208,27 +208,41 @@ def stooq_chart(symbol: str, range_value: str) -> dict[str, Any]:
 
 
 def fetch_chart(symbol: str, range_value: str = "1mo", interval: str = "1d") -> dict[str, Any]:
-    daily_history = interval == "1d" and _range_days(range_value) >= 365
-    key = (symbol.upper(), range_value)
-    if daily_history:
+    from backend import pricecache
+
+    history = _range_days(range_value) >= 365
+    daily_history = interval == "1d" and history
+    key = (symbol.upper(), range_value, interval)
+    if history:
         cached = _history_cache.get(key)
         if cached and time.time() - cached[0] < _HISTORY_CACHE_SECONDS:
             return cached[1]
+    stored, fresh = pricecache.get(symbol, range_value) if daily_history else (None, False)
+    if stored and fresh:
+        _history_cache[key] = (time.time(), stored)
+        return stored
     try:
-        chart = yahoo_chart(symbol, range_value, interval)
+        if stored:  # stale: only download the last month and merge it in
+            chart = pricecache.merge(stored, yahoo_chart(symbol, "1mo", "1d"))
+        else:
+            chart = yahoo_chart(symbol, range_value, interval)
+        if daily_history:
+            pricecache.put(symbol, range_value, chart)
     except MarketDataError as exc:
-        chart = None
-        if interval == "1d":
+        chart = stored  # better a few hours old than nothing
+        if chart is None and interval == "1d":
             try:
                 chart = stooq_chart(symbol, range_value)
                 logger.warning("Yahoo failed for %s (%s); using Stooq", symbol, exc)
             except MarketDataError as fallback_exc:
                 logger.error("Chart fetch failed for %s: %s; Stooq: %s", symbol, exc, fallback_exc)
-        else:
+        elif chart is None:
             logger.error("Chart fetch failed for %s: %s", symbol, exc)
+        else:
+            logger.warning("Yahoo failed for %s (%s); serving the cached history", symbol, exc)
         if chart is None:
             raise HTTPException(status_code=502, detail=f"No market data for {symbol.upper()}") from exc
-    if daily_history:
+    if history:
         if len(_history_cache) > 64:
             _history_cache.clear()
         _history_cache[key] = (time.time(), chart)

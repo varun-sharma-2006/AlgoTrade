@@ -30,6 +30,17 @@ import {
   saveAlertSettings,
   sendTestAlert,
   fetchDailySignals,
+  optimizeStrategy,
+  reviewBacktest,
+  createReport,
+  exportNotebook,
+  rulesFromText,
+  runSip,
+  runOptions,
+  runLeaderboard,
+  fetchWatchAlerts,
+  addWatchAlert,
+  deleteWatchAlert,
   updateSimulation,
   askChat,
   type AuthResponse,
@@ -49,12 +60,20 @@ import { PortfolioPage } from "./components/PortfolioPage";
 import { StrategyBuilder } from "./components/StrategyBuilder";
 import { PortfolioLab } from "./components/PortfolioLab";
 import { AlertsPanel } from "./components/AlertsPanel";
+import { SipPlanner } from "./components/SipPlanner";
+import { OptionsLab } from "./components/OptionsLab";
+import { Leaderboard } from "./components/Leaderboard";
+import { LearnPage, OnboardingTour, TOUR_KEY } from "./components/LearnPage";
 import {
   BuilderIcon,
   ChatIcon,
   HomeIcon,
   LabIcon,
+  LearnIcon,
   LiveIcon,
+  OptionsIcon,
+  SipIcon,
+  TrophyIcon,
   LogoMark,
   LogoutIcon,
   PortfolioIcon,
@@ -81,6 +100,9 @@ import type {
   RobustnessPayload,
   BasketPayload,
   AlertSettings,
+  Condition,
+  SipPayload,
+  OptionsPayload,
   SparklineSeries,
   User,
 } from "./types";
@@ -90,7 +112,20 @@ const WATCHLIST_SYMBOLS = ["AAPL", "MSFT", "GOOGL", "AMZN", "TSLA", "NVDA"];
 const TRUTHY_ENV_FLAGS = new Set(["1", "true", "yes", "on"]);
 
 type AuthView = "login" | "signup" | "dashboard";
-type Page = "home" | "portfolio" | "simulations" | "lab" | "builder" | "chat" | "strategies" | "live" | "visitors";
+type Page =
+  | "home"
+  | "portfolio"
+  | "simulations"
+  | "lab"
+  | "leaderboard"
+  | "sip"
+  | "options"
+  | "builder"
+  | "learn"
+  | "chat"
+  | "strategies"
+  | "live"
+  | "visitors";
 
 interface SessionState {
   token: string;
@@ -114,7 +149,11 @@ const NAV_ITEMS: Array<{ page: Page; label: string; icon: typeof HomeIcon; admin
   { page: "portfolio", label: "Portfolio", icon: PortfolioIcon },
   { page: "simulations", label: "Simulations", icon: SimulationsIcon },
   { page: "lab", label: "Portfolio lab", icon: LabIcon },
+  { page: "leaderboard", label: "Leaderboard", icon: TrophyIcon },
+  { page: "sip", label: "SIP planner", icon: SipIcon },
+  { page: "options", label: "Options lab", icon: OptionsIcon },
   { page: "builder", label: "Strategy builder", icon: BuilderIcon },
+  { page: "learn", label: "Learn", icon: LearnIcon },
   { page: "chat", label: "Trading copilot", icon: ChatIcon },
   { page: "strategies", label: "Strategies", icon: StrategyIcon },
   { page: "live", label: "Live markets", icon: LiveIcon },
@@ -582,6 +621,48 @@ export default function App() {
     [token],
   );
   const handleTestAlert = useCallback(() => sendTestAlert(token ?? ""), [token]);
+  const handleOptimize = useCallback((payload: TrainingPayload) => optimizeStrategy(token ?? "", payload), [token]);
+  const handleReview = useCallback((payload: RobustnessPayload) => reviewBacktest(token ?? "", payload), [token]);
+  const handleShare = useCallback(
+    async (payload: TrainingPayload) => (await createReport(token ?? "", payload)).path ?? "",
+    [token],
+  );
+  const handleNotebook = useCallback((payload: TrainingPayload) => exportNotebook(token ?? "", payload), [token]);
+  const handleFromText = useCallback((text: string) => rulesFromText(token ?? "", text), [token]);
+  const handleBuilderWalkForward = useCallback(
+    (symbol: string, rules: StrategyRules) => runWalkForward(token ?? "", { symbol, strategyId: "custom", rules }),
+    [token],
+  );
+  const handleBuilderNotebook = useCallback(
+    (symbol: string, rules: StrategyRules) => exportNotebook(token ?? "", { symbol, strategyId: "custom", rules }),
+    [token],
+  );
+  const handleSip = useCallback((payload: SipPayload) => runSip(token ?? "", payload), [token]);
+  const handleOptions = useCallback((payload: OptionsPayload) => runOptions(token ?? "", payload), [token]);
+  const handleLeaderboard = useCallback(
+    (symbols: string[], custom: Array<{ name: string; rules: StrategyRules }>) => runLeaderboard(token ?? "", symbols, custom),
+    [token],
+  );
+  const handleLearnBacktest = useCallback((payload: TrainingPayload) => trainStrategy(token ?? "", payload), [token]);
+  const watchAlerts = useMemo(
+    () => ({
+      load: () => fetchWatchAlerts(token ?? ""),
+      add: (payload: { symbol: string; condition: Condition; note?: string }) => addWatchAlert(token ?? "", payload),
+      remove: (id: string) => deleteWatchAlert(token ?? "", id),
+    }),
+    [token],
+  );
+  const handleToggleMirror = useCallback(
+    (simulationId: string, enabled: boolean) => updateSimulation(token ?? "", simulationId, { brokerMirror: enabled }),
+    [token],
+  );
+  const [showTour, setShowTour] = useState(() => {
+    try {
+      return !window.localStorage.getItem(TOUR_KEY);
+    } catch {
+      return false;
+    }
+  });
   const handleBuilderBacktest = useCallback(
     (symbol: string, rules: StrategyRules) => trainStrategy(token ?? "", { symbol, strategyId: "custom", rules }),
     [token],
@@ -752,6 +833,10 @@ export default function App() {
             onPredictStrategy={handlePredictStrategy}
             onWalkForward={handleWalkForward}
             onRobustness={handleRobustness}
+            onOptimize={handleOptimize}
+            onReview={handleReview}
+            onShare={handleShare}
+            onNotebook={handleNotebook}
             recentTraining={trainingResult}
             recentPrediction={predictionResult}
             onLogout={handleLogout}
@@ -771,12 +856,24 @@ export default function App() {
                 onLoadSettings={loadAlertSettings}
                 onSaveSettings={handleSaveAlertSettings}
                 onTest={handleTestAlert}
+                watch={watchAlerts}
+                onToggleMirror={handleToggleMirror}
               />
             }
           />
         );
       case "lab":
         return <PortfolioLab onRun={handleBasket} customStrategies={customStrategies} />;
+      case "leaderboard":
+        return <Leaderboard onRun={handleLeaderboard} customStrategies={customStrategies} />;
+      case "sip":
+        return <SipPlanner onRun={handleSip} customStrategies={customStrategies} />;
+      case "options":
+        return <OptionsLab onRun={handleOptions} />;
+      case "learn":
+        return (
+          <LearnPage runBacktest={handleLearnBacktest} runOptimize={handleOptimize} onStartTour={() => setShowTour(true)} />
+        );
       case "builder":
         return (
           <StrategyBuilder
@@ -785,6 +882,9 @@ export default function App() {
             onSave={handleSaveCustomStrategy}
             onDelete={handleDeleteCustomStrategy}
             onExportPine={handleExportPine}
+            onFromText={handleFromText}
+            onWalkForward={handleBuilderWalkForward}
+            onNotebook={handleBuilderNotebook}
           />
         );
       case "chat":
@@ -854,6 +954,7 @@ export default function App() {
         {error && page !== "simulations" ? <div className="error-banner">{error}</div> : null}
         {renderContent()}
       </main>
+      {showTour ? <OnboardingTour onNavigate={(target) => setPage(target as Page)} onClose={() => setShowTour(false)} /> : null}
     </div>
   );
 }

@@ -14,7 +14,7 @@ from fastapi.responses import FileResponse
 from backend import stores
 from backend.config import settings
 from backend.deps import get_current_user, get_db
-from backend.routes import admin, alerts, analytics, auth, chat, market, portfolio, simulations
+from backend.routes import admin, alerts, analytics, auth, chat, market, portfolio, reports, research, simulations
 from backend.stores import InMemoryStore, MongoStore, now
 
 __all__ = ["app", "get_current_user", "get_db", "MongoStore", "InMemoryStore", "now"]
@@ -29,7 +29,15 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         await app.state.store.close()
 
 
-app = FastAPI(title="Algo Trade Simulator API", version="0.3.0", lifespan=lifespan)
+if settings.sentry_dsn:  # optional error reporting
+    try:
+        import sentry_sdk
+
+        sentry_sdk.init(dsn=settings.sentry_dsn, traces_sample_rate=0.05, send_default_pii=False)
+    except ImportError:
+        pass
+
+app = FastAPI(title="Algo Trade Simulator API", version="0.4.0", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=list({settings.frontend_origin, "http://localhost:5173"}),
@@ -37,7 +45,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-for module in (auth, admin, market, simulations, analytics, portfolio, alerts, chat):
+for module in (auth, admin, market, simulations, analytics, research, reports, portfolio, alerts, chat):
     app.include_router(module.router)
 
 
