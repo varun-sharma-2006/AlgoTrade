@@ -1,8 +1,14 @@
-"""Values paper-trading simulations: replays each one's strategy on real daily closes from its start date.
+"""Values paper-trading simulations: replays each one's strategy on real daily prices from its start date.
 
-The rules match the backtester: the position decided at a day's close is held through the next day, and
-every buy and sell pays the trading fee. The money starts in cash on the start date, so a strategy that is
-already "long" buys at that day's close.
+The rules match the backtester: the position decided at a day's close is taken at that close or at the next
+day's open (the server's EXECUTION setting), intraday stops fill at their level, and every buy and sell pays
+the trading fee and slippage. The money starts in cash on the start date.
+
+Starting capital is in the base currency (USD by default). A simulation on a stock quoted in another currency
+converts the capital at the start date's exchange rate and converts the value back at each day's rate, so
+the currency's move is part of the profit or loss, as it would be for a real investor.
+
+Every fill is recorded in a ledger with its date, side, price, shares, fee and slippage.
 """
 
 from __future__ import annotations
@@ -16,6 +22,23 @@ def _day(timestamp: str) -> str:
     return timestamp[:10]
 
 
+def align_fx(days: list[str], rates: dict[str, float] | None) -> list[float] | None:
+    """The exchange rate on each day, carried forward over days the currency market didn't quote."""
+    if not rates:
+        return None
+    if "*" in rates:
+        return [rates["*"]] * len(days)
+    known = sorted(rates)
+    out: list[float] = []
+    k, last = 0, rates[known[0]]
+    for day in days:
+        while k < len(known) and known[k] <= day:
+            last = rates[known[k]]
+            k += 1
+        out.append(last)
+    return out
+
+
 def value_simulation(
     closes: list[float],
     timestamps: list[str],
@@ -26,26 +49,64 @@ def value_simulation(
     start_date: str,
     capital: float,
     fee_bps: float,
+    sell_fee_bps: float | None = None,
+    slippage_bps: float = 0.0,
+    bars: strategies.Bars | None = None,
+    execution: str = "close",
+    fx: list[float] | None = None,
 ) -> dict[str, Any]:
     days = [_day(ts) for ts in timestamps]
     start = next((i for i, day in enumerate(days) if day >= start_date), len(days) - 1)
-    target, _ = strategies.signals(strategy_id, closes, params, rules)
-    fee = fee_bps / 10_000
+    last = len(closes) - 1
+    planned = strategies.plan(strategy_id, closes, params, rules, bars=bars, execution=execution)
+    opens = (bars or {}).get("open")
+    if opens is not None and None in opens:
+        opens = None
+    sell_fee = fee_bps if sell_fee_bps is None else sell_fee_bps
+    run = strategies.simulate(
+        closes,
+        planned["target"],
+        start,
+        last,
+        fee_bps + slippage_bps,
+        sell_cost_bps=sell_fee + slippage_bps,
+        opens=opens,
+        execution=execution,
+        fills=planned["fills"],
+    )
+    rate = fx or [1.0] * len(closes)
+    capital_local = capital / rate[start]  # base-currency capital converted at the start date
+    history = [
+        {"date": days[t], "value": capital_local * run["equity"][k] * rate[t]}
+        for k, t in enumerate(range(start, last + 1))
+    ]
 
-    value, held, trades = capital, 0, 0
-    history = []
-    for t in range(start, len(closes)):
-        if t > start and held:
-            value *= closes[t] / closes[t - 1]
-        if target[t] != held:
-            value *= 1 - fee
-            held = target[t]
-            trades += 1
-        history.append({"date": days[t], "value": value})
+    ledger = []
+    for fill in run["fills"]:
+        traded = abs(fill["to"] - fill["from"]) * fill["valueBefore"] * capital_local
+        buying = fill["to"] > fill["from"]
+        ledger.append(
+            {
+                "date": days[fill["index"]],
+                "side": "buy" if buying else "sell",
+                "price": fill["price"],
+                "shares": traded / fill["price"] if fill["price"] else 0.0,
+                "notional": traded,
+                "fee": traded * (fee_bps if buying else sell_fee) / 10_000,
+                "slippage": traded * slippage_bps / 10_000,
+                "stop": fill["to"] == 0 and planned["fills"].get(fill["index"]) == fill["price"],
+            }
+        )
 
+    value = history[-1]["value"]
     first_close = closes[start]
-    buy_hold_value = capital * (1 - fee) * closes[-1] / first_close
+    fx_move = rate[last] / rate[start]
+    buy_hold_value = capital * (1 - (fee_bps + slippage_bps) / 10_000) * closes[-1] / first_close * fx_move
     previous = history[-2]["value"] if len(history) > 1 else capital
+    held = run["held"]
+    pending = None
+    if execution == "next_open" and opens is not None and planned["target"][last] != held:
+        pending = "buy" if planned["target"][last] > held else "sell"
     return {
         "value": value,
         "pnl": value - capital,
@@ -53,12 +114,15 @@ def value_simulation(
         "dayChange": value - previous,
         "dayChangePct": value / previous - 1 if previous else 0.0,
         "inMarket": bool(held),
-        "shares": value / closes[-1] if held else 0.0,
+        "shares": held * capital_local * run["equity"][-1] / closes[-1] if held else 0.0,
         "lastPrice": closes[-1],
         "startDate": days[start],
         "startPrice": first_close,
         "buyHoldValue": buy_hold_value,
-        "trades": trades,
+        "fxReturn": fx_move - 1 if fx else 0.0,
+        "trades": len(ledger),
+        "pendingOrder": pending,
+        "ledger": ledger[-100:],
         "history": history,
     }
 

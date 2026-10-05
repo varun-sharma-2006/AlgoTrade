@@ -53,6 +53,25 @@ class Settings(BaseModel):
     trading_fee_bps: float = Field(default_factory=lambda: float(os.getenv("TRADING_FEE_BPS", "10")))
     # Default slippage: how much worse than the close each fill is assumed to be.
     slippage_bps: float = Field(default_factory=lambda: float(os.getenv("SLIPPAGE_BPS", "5")))
+    # When a decision made at a day's close is filled: "next_open" (realistic) or "close" (the same close).
+    execution: str = Field(default_factory=lambda: os.getenv("EXECUTION", "next_open"))
+    # Annual risk-free rate used by Sharpe, Sortino and alpha (e.g. 0.04 = 4%).
+    risk_free_rate: float = Field(default_factory=lambda: float(os.getenv("RISK_FREE_RATE", "0.04")))
+    # Annual fee for borrowing shares to short, in basis points.
+    borrow_bps: float = Field(default_factory=lambda: float(os.getenv("BORROW_BPS", "50")))
+    # Brokerage on Indian (NSE/BSE) delivery trades, in basis points; most discount brokers charge 0.
+    india_brokerage_bps: float = Field(default_factory=lambda: float(os.getenv("INDIA_BROKERAGE_BPS", "0")))
+    # Currency the portfolio is valued in; positions in other currencies are converted at daily FX rates.
+    base_currency: str = Field(default_factory=lambda: os.getenv("BASE_CURRENCY", "USD").upper())
+    # Daily signal job (/cron/daily): the bearer token schedulers must send (Vercel Cron sends CRON_SECRET).
+    cron_secret: str = Field(default_factory=lambda: os.getenv("CRON_SECRET", ""))
+    # Alerts. Email needs SMTP settings; Telegram needs a bot token (each user adds their own chat id).
+    smtp_host: str = Field(default_factory=lambda: os.getenv("SMTP_HOST", ""))
+    smtp_port: int = Field(default_factory=lambda: int(os.getenv("SMTP_PORT", "587")))
+    smtp_user: str = Field(default_factory=lambda: os.getenv("SMTP_USER", ""))
+    smtp_password: str = Field(default_factory=lambda: os.getenv("SMTP_PASSWORD", ""))
+    smtp_from: str = Field(default_factory=lambda: os.getenv("SMTP_FROM", ""))
+    telegram_bot_token: str = Field(default_factory=lambda: os.getenv("TELEGRAM_BOT_TOKEN", ""))
     # Built frontend (npm run build -> dist/) to serve from the API, for single-container deploys.
     static_dir: str = Field(default_factory=lambda: os.getenv("STATIC_DIR", ""))
     yahoo_user_agent: str = Field(

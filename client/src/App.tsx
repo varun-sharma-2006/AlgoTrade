@@ -23,6 +23,13 @@ import {
   signup,
   trainStrategy,
   runWalkForward,
+  runRobustness,
+  runBasket,
+  exportPine,
+  fetchAlertSettings,
+  saveAlertSettings,
+  sendTestAlert,
+  fetchDailySignals,
   updateSimulation,
   askChat,
   type AuthResponse,
@@ -40,10 +47,13 @@ import { googleSignOut } from "./components/GoogleSignIn";
 import { VisitorsPage } from "./components/VisitorsPage";
 import { PortfolioPage } from "./components/PortfolioPage";
 import { StrategyBuilder } from "./components/StrategyBuilder";
+import { PortfolioLab } from "./components/PortfolioLab";
+import { AlertsPanel } from "./components/AlertsPanel";
 import {
   BuilderIcon,
   ChatIcon,
   HomeIcon,
+  LabIcon,
   LiveIcon,
   LogoMark,
   LogoutIcon,
@@ -68,6 +78,9 @@ import type {
   TrainingPayload,
   TrainingResult,
   WalkForwardPayload,
+  RobustnessPayload,
+  BasketPayload,
+  AlertSettings,
   SparklineSeries,
   User,
 } from "./types";
@@ -77,7 +90,7 @@ const WATCHLIST_SYMBOLS = ["AAPL", "MSFT", "GOOGL", "AMZN", "TSLA", "NVDA"];
 const TRUTHY_ENV_FLAGS = new Set(["1", "true", "yes", "on"]);
 
 type AuthView = "login" | "signup" | "dashboard";
-type Page = "home" | "portfolio" | "simulations" | "builder" | "chat" | "strategies" | "live" | "visitors";
+type Page = "home" | "portfolio" | "simulations" | "lab" | "builder" | "chat" | "strategies" | "live" | "visitors";
 
 interface SessionState {
   token: string;
@@ -100,6 +113,7 @@ const NAV_ITEMS: Array<{ page: Page; label: string; icon: typeof HomeIcon; admin
   { page: "home", label: "Overview", icon: HomeIcon },
   { page: "portfolio", label: "Portfolio", icon: PortfolioIcon },
   { page: "simulations", label: "Simulations", icon: SimulationsIcon },
+  { page: "lab", label: "Portfolio lab", icon: LabIcon },
   { page: "builder", label: "Strategy builder", icon: BuilderIcon },
   { page: "chat", label: "Trading copilot", icon: ChatIcon },
   { page: "strategies", label: "Strategies", icon: StrategyIcon },
@@ -462,7 +476,12 @@ export default function App() {
       try {
         const trained =
           trainingResult && trainingResult.symbol === symbol.toUpperCase()
-            ? { strategyId: trainingResult.strategyId, parameters: trainingResult.parameters, rules: trainingResult.rules }
+            ? {
+                strategyId: trainingResult.strategyId,
+                parameters: trainingResult.parameters,
+                rules: trainingResult.rules,
+                allowShort: trainingResult.metrics.allowShort ?? false,
+              }
             : undefined;
         const result = await predictStrategy(token, symbol, trained);
         setPredictionResult(result);
@@ -547,6 +566,22 @@ export default function App() {
     (payload: WalkForwardPayload) => runWalkForward(token ?? "", payload),
     [token],
   );
+  const handleRobustness = useCallback(
+    (payload: RobustnessPayload) => runRobustness(token ?? "", payload),
+    [token],
+  );
+  const handleBasket = useCallback((payload: BasketPayload) => runBasket(token ?? "", payload), [token]);
+  const handleExportPine = useCallback(
+    async (name: string, rules: StrategyRules) => (await exportPine(token ?? "", name, rules)).script,
+    [token],
+  );
+  const loadSignals = useCallback(() => fetchDailySignals(token ?? ""), [token]);
+  const loadAlertSettings = useCallback(() => fetchAlertSettings(token ?? ""), [token]);
+  const handleSaveAlertSettings = useCallback(
+    (settings: AlertSettings) => saveAlertSettings(token ?? "", settings),
+    [token],
+  );
+  const handleTestAlert = useCallback(() => sendTestAlert(token ?? ""), [token]);
   const handleBuilderBacktest = useCallback(
     (symbol: string, rules: StrategyRules) => trainStrategy(token ?? "", { symbol, strategyId: "custom", rules }),
     [token],
@@ -716,6 +751,7 @@ export default function App() {
             onTrainStrategy={handleTrainStrategy}
             onPredictStrategy={handlePredictStrategy}
             onWalkForward={handleWalkForward}
+            onRobustness={handleRobustness}
             recentTraining={trainingResult}
             recentPrediction={predictionResult}
             onLogout={handleLogout}
@@ -725,7 +761,22 @@ export default function App() {
           />
         );
       case "portfolio":
-        return <PortfolioPage onLoad={loadPortfolio} onOpenSimulations={() => setPage("simulations")} />;
+        return (
+          <PortfolioPage
+            onLoad={loadPortfolio}
+            onOpenSimulations={() => setPage("simulations")}
+            alerts={
+              <AlertsPanel
+                onLoadSignals={loadSignals}
+                onLoadSettings={loadAlertSettings}
+                onSaveSettings={handleSaveAlertSettings}
+                onTest={handleTestAlert}
+              />
+            }
+          />
+        );
+      case "lab":
+        return <PortfolioLab onRun={handleBasket} customStrategies={customStrategies} />;
       case "builder":
         return (
           <StrategyBuilder
@@ -733,6 +784,7 @@ export default function App() {
             onBacktest={handleBuilderBacktest}
             onSave={handleSaveCustomStrategy}
             onDelete={handleDeleteCustomStrategy}
+            onExportPine={handleExportPine}
           />
         );
       case "chat":

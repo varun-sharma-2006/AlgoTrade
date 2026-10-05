@@ -108,6 +108,7 @@ def session_allowed(provider: str | None) -> bool:
 
 
 MAX_CUSTOM_STRATEGIES = 20
+DEFAULT_ALERTS: dict[str, Any] = {"email": False, "telegramChatId": None}
 
 
 def _simulation_trading_fields(payload: SimulationInput) -> dict[str, Any]:
@@ -295,6 +296,26 @@ class MongoStore:
         cursor = self.db.logins.find({}).sort("at", -1).limit(limit)
         return serialize_mongo_doc(await cursor.to_list(length=limit))
 
+    # Alerts and the daily signal job
+    async def get_user(self, user_id: str) -> dict[str, Any] | None:
+        doc = await self.users.find_one({"_id": _object_id(user_id)})
+        return _public_user(doc) if doc else None
+
+    async def get_alert_settings(self, user_id: str) -> dict[str, Any]:
+        doc = await self.users.find_one({"_id": _object_id(user_id)}, {"alerts": 1})
+        return (doc or {}).get("alerts") or dict(DEFAULT_ALERTS)
+
+    async def set_alert_settings(self, user_id: str, prefs: dict[str, Any]) -> dict[str, Any]:
+        await self.users.update_one({"_id": _object_id(user_id)}, {"$set": {"alerts": prefs}})
+        return prefs
+
+    async def list_active_simulations(self) -> list[dict[str, Any]]:
+        cursor = self.simulations.find({"status": "active"})
+        return serialize_mongo_doc(await cursor.to_list(length=5000))
+
+    async def mark_alerted(self, sim_id: str, key: str) -> None:
+        await self.simulations.update_one({"_id": _object_id(sim_id)}, {"$set": {"lastAlert": key}})
+
 
 class InMemoryStore:
     """Ephemeral store for local development and demos (USE_IN_MEMORY_DB=true). Data resets on restart.
@@ -312,6 +333,7 @@ class InMemoryStore:
         self.trained: dict[str, dict[str, Any]] = {}
         self.custom_strategies: dict[str, dict[str, Any]] = {}
         self.logins: list[dict[str, Any]] = []
+        self.alerts: dict[str, dict[str, Any]] = {}
 
     async def close(self) -> None:
         return None
@@ -473,6 +495,29 @@ class InMemoryStore:
     async def list_logins(self, limit: int = 100) -> list[dict[str, Any]]:
         async with self.lock:
             return list(reversed(self.logins[-limit:]))
+
+    async def get_user(self, user_id: str) -> dict[str, Any] | None:
+        async with self.lock:
+            record = self.users_by_id.get(user_id)
+        return _public_user(record) if record else None
+
+    async def get_alert_settings(self, user_id: str) -> dict[str, Any]:
+        async with self.lock:
+            return dict(self.alerts.get(user_id) or DEFAULT_ALERTS)
+
+    async def set_alert_settings(self, user_id: str, prefs: dict[str, Any]) -> dict[str, Any]:
+        async with self.lock:
+            self.alerts[user_id] = dict(prefs)
+        return prefs
+
+    async def list_active_simulations(self) -> list[dict[str, Any]]:
+        async with self.lock:
+            return [dict(r) for r in self.simulations.values() if str(r.get("status", "")).lower() == "active"]
+
+    async def mark_alerted(self, sim_id: str, key: str) -> None:
+        async with self.lock:
+            if sim_id in self.simulations:
+                self.simulations[sim_id]["lastAlert"] = key
 
 
 Store = MongoStore | InMemoryStore

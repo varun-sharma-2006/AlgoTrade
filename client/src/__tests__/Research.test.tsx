@@ -164,19 +164,38 @@ describe("Strategy lab extras", () => {
       />,
     );
     fireEvent.change(screen.getByLabelText("Strategy"), { target: { value: "ml-logistic" } });
+    fireEvent.change(screen.getByLabelText("Model"), { target: { value: "1" } });
+    fireEvent.change(screen.getByLabelText("Predict"), { target: { value: "5" } });
     fireEvent.change(screen.getByLabelText("Buy when P(up) ≥"), { target: { value: "0.55" } });
     fireEvent.change(screen.getByLabelText("Slippage (bps per trade)"), { target: { value: "8" } });
+    fireEvent.click(screen.getByLabelText("Allow short selling"));
     fireEvent.click(screen.getByRole("button", { name: "Run backtest" }));
     expect(onTrain).toHaveBeenCalledWith({
       symbol: "AAPL",
       strategyId: "ml-logistic",
+      modelType: 1,
+      horizon: 5,
       threshold: 0.55,
       trainWindow: 504,
+      execution: "next_open",
+      sizing: "full",
+      sizeFraction: 0.5,
+      targetVol: 0.15,
+      maxLeverage: 1,
+      allowShort: true,
+      borrowBps: 50,
+      riskFreeRate: 0.04,
       slippageBps: 8,
     });
 
     fireEvent.click(screen.getByRole("button", { name: "Walk-forward test" }));
-    expect(onWalkForward).toHaveBeenCalledWith({ symbol: "AAPL", strategyId: "ml-logistic", slippageBps: 8 });
+    expect(onWalkForward).toHaveBeenCalledWith({
+      symbol: "AAPL",
+      strategyId: "ml-logistic",
+      slippageBps: 8,
+      execution: "next_open",
+      allowShort: true,
+    });
     await waitFor(() => expect(screen.getByText("AAPL · 1 out-of-sample quarters")).toBeInTheDocument());
 
     fireEvent.change(screen.getByLabelText("Strategy"), { target: { value: "buy-hold" } });

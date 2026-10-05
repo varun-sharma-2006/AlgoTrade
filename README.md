@@ -20,20 +20,39 @@ machine-learning strategy that is trained only on the past, and ask the trading 
 
 ## Features
 
-- **Honest backtesting**: long-only strategies (SMA crossover, Bollinger mean reversion, Donchian breakout and a
-  machine-learning model) simulated trade by trade on the last 2 years of daily data, with earlier history used
-  only to warm up indicators. Positions are decided at the close using only past data, every entry and exit pays a
-  fee (10 bps) plus adjustable slippage (5 bps by default), and results are always shown next to buy & hold.
+- **Honest backtesting**: strategies (SMA crossover, Bollinger mean reversion, Donchian breakout, regime
+  switching and a machine-learning model) simulated trade by trade on the last 2 years of daily data, with earlier
+  history used only to warm up indicators. Decisions use only past data and, by default, **fill at the next day's
+  open**, so overnight gaps are paid for. Stops are checked against each day's high and low and fill at the stop
+  (or at the open when the price gaps through it). Every buy and sell pays a fee (10 bps) plus adjustable slippage
+  (5 bps by default), and results are always shown next to buy & hold.
+- **Position sizing and shorting**: 100% of equity, a fixed fraction, or volatility targeting (size so the position
+  runs at, say, 15% annual volatility, capped at a maximum leverage). Any strategy can also go short, paying a
+  borrow fee for every day the short is held.
+- **Indian markets**: NSE/BSE stocks (`.NS`, `.BO`) pay real delivery charges (STT, stamp duty on buys, exchange
+  and SEBI fees, GST) instead of the flat fee, are compared with the NIFTY 50, and are shown in rupees.
 - **Risk analytics**: total and annualised return, volatility, Sharpe, Sortino, max drawdown and Calmar for the
-  strategy, buy & hold and the S&P 500 side by side, plus beta, alpha and correlation to the index, win rate,
-  time in market, a growth-of-$1 chart against buy & hold, a drawdown chart and the trade log.
+  strategy, buy & hold and the index side by side (net of a configurable risk-free rate), plus beta, alpha and
+  correlation to the index, 1-day VaR and CVaR, profit factor, turnover, win rate, time in market, a growth-of-$1
+  chart, a drawdown chart, rolling 6-month Sharpe and beta, a monthly-returns heatmap and the trade log.
+- **Robustness check**: is the result skill, luck or overfitting? A block-bootstrap Monte Carlo (500 resampled
+  paths) gives a range of outcomes and the chance of losing money or trailing buy & hold; a parameter-sensitivity
+  heatmap shows whether nearby settings also work; the **deflated Sharpe ratio** corrects for how many settings were
+  tried; and the **probability of backtest overfitting** (combinatorially symmetric cross-validation) shows how often
+  the in-sample winner falls into the bottom half out of sample.
+- **Portfolio lab**: run one strategy on a basket of up to 30 stocks with equal, inverse-volatility or risk-parity
+  weights, weekly/monthly/quarterly rebalancing and optional top-N momentum selection, then see each stock's
+  result on its own: a real edge should show up on most of them, not one lucky ticker.
 - **Walk-forward testing**: every quarter, each parameter set is backtested on the previous year and the best one
   (by Sharpe) trades the next quarter, which it has never seen, rolling forward over 5 years. It shows how much
   of a backtest's edge was curve fitting: tuned (in-sample) vs out-of-sample returns, fold by fold.
-- **Machine-learning strategy**: logistic regression on 8 price features (returns, moving-average gaps, RSI,
-  volatility, Bollinger z-score) predicts whether tomorrow closes higher. It is refitted every month on a rolling
-  window of past days only, and reports out-of-sample accuracy against an always-up baseline, ROC-AUC, and its
-  feature weights. Written from scratch in Python, with no numpy or scikit-learn.
+- **Machine-learning strategy**: logistic regression or gradient-boosted decision stumps on up to 12 features
+  (returns, moving-average gaps, RSI, volatility, Bollinger z-score, volume, average true range, and the market's
+  own 20-day return and volatility) predict whether the price will be higher tomorrow, or 1, 2 or 4 weeks ahead.
+  Models are refitted on a rolling window of past days only, and the report shows out-of-sample accuracy against
+  an always-up baseline, ROC-AUC, a calibration chart, feature weights or importances, and the buy threshold that
+  worked best after costs on the days *before* the backtest window. Written from scratch in Python, with no numpy
+  or scikit-learn.
 - **Today's signal**: re-runs the trained strategy on the latest data and reports buy / hold / sell / wait with the reason.
 - **Trading copilot with actions**: Gemini function calling runs the app's own backtester. "Backtest AAPL with
   SMA 20/60", "Compare strategies on NVDA", "Walk-forward test MSFT with Bollinger" or "Put $5,000 in NVDA with
@@ -43,10 +62,16 @@ machine-learning strategy that is trained only on the past, and ask the trading 
 - **Live market data**: watchlist quotes, sparklines, ticker search and candlestick charts.
 - **Paper-trading portfolio**: invest paper money in any stock with any strategy, backdated up to a year. Each
   simulation is replayed on real daily prices with its strategy's buy/sell rules and fees, so the Portfolio page
-  shows live value, profit and loss, today's change, allocation, and how each one did against buy & hold.
-- **Strategy Builder**: design your own strategy from rules such as "RSI(14) is below 30" or
-  "SMA(50) crosses above SMA(200)", add a stop-loss or take-profit, read it back in plain English, backtest it,
-  save it, and use it in simulations.
+  shows live value, profit and loss, today's change, allocation, a ledger of every fill (shares, price, fee,
+  slippage) and how each one did against buy & hold. Stocks quoted in another currency are converted at daily
+  exchange rates, so a dollar investor in an Indian stock sees the rupee's move too.
+- **Daily signals and alerts**: the Portfolio page shows what each simulation's strategy says at the latest close.
+  A daily job (Vercel Cron, or the included GitHub Actions workflow) emails and/or sends a Telegram message when a
+  strategy signals a trade.
+- **Strategy Builder**: design your own strategy from rules such as "RSI(14) is below 30", "MACD histogram crosses
+  above 0" or "Price crosses above Highest close(55)" (also EMA, ATR, rate of change and volume), combine entry
+  rules with AND or OR, trade long or short, add a stop-loss, take-profit, trailing stop or time exit, read it back
+  in plain English, backtest it, save it, use it in simulations, and **export it to TradingView Pine Script**.
 - **Sign in with Google**: Google verifies each visitor's email; an admin-only **Visitors** page lists who signed in, when and from which device, with CSV export.
 - **Runs anywhere**: an in-memory mode needs no database; MongoDB is used for persistence.
 
@@ -103,8 +128,12 @@ backend/
   risk.py           volatility, Sharpe, Sortino, drawdown, Calmar, beta/alpha vs the S&P 500
   ml.py             machine-learning strategy (logistic regression, time-aware retraining)
   walkforward.py    walk-forward testing (tune on a year, test on the next quarter)
+  robustness.py     Monte Carlo, parameter sensitivity, deflated Sharpe ratio, probability of overfitting
+  basket.py         multi-stock portfolio backtests (equal / inverse-vol / risk-parity weights, rebalancing)
+  costs.py          trading costs and benchmarks per market (flat fee, or NSE delivery charges)
+  alerts.py         daily trade signals and email / Telegram alerts
   copilot.py        copilot tools for Gemini function calling, and the offline request parser
-  rules.py          Strategy Builder rule engine (SMA, EMA, RSI, crossovers, stop-loss, take-profit)
+  rules.py          Strategy Builder rule engine (indicators, AND/OR, long/short, stops, Pine Script export)
   portfolio.py      replays simulations on real prices and totals the portfolio
   advisor.py        chatbot analyst used when Gemini is unavailable
   gemini.py         Gemini client with retries and model fallback
@@ -197,6 +226,14 @@ override variables already set in your system environment.
 | `HISTORY_PERIOD` | Price history fetched (Yahoo Finance range): the backtest window plus warm-up, ML training data and walk-forward folds | `5y` |
 | `TRADING_FEE_BPS` | Fee charged on every entry and exit, in basis points | `10` |
 | `SLIPPAGE_BPS` | Default slippage per entry and exit, in basis points (the Strategy lab can override it) | `5` |
+| `EXECUTION` | When a decision made at a close is filled: `next_open` or `close` (the lab can override it) | `next_open` |
+| `RISK_FREE_RATE` | Annual risk-free rate used by Sharpe, Sortino and alpha (`0.04` = 4%) | `0.04` |
+| `BORROW_BPS` | Annual fee for borrowing shares to short, in basis points | `50` |
+| `INDIA_BROKERAGE_BPS` | Brokerage on NSE/BSE delivery trades (taxes and charges are added automatically) | `0` |
+| `BASE_CURRENCY` | Currency the portfolio is valued in | `USD` |
+| `CRON_SECRET` | Bearer token the daily signal job (`/cron/daily`) requires; Vercel Cron sends it automatically | unset (job disabled) |
+| `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD`, `SMTP_FROM` | Email sender for trade alerts (STARTTLS) | unset |
+| `TELEGRAM_BOT_TOKEN` | Telegram bot for trade alerts; each user adds their chat id on the Portfolio page | unset |
 | `STATIC_DIR` | Serve a built frontend (`dist/`) from the API, for single-container deploys | unset |
 | `FRONTEND_ORIGIN` | Allowed CORS origin | `http://localhost:5173` |
 | `SESSION_DURATION_DAYS` | Session lifetime | `7` |
@@ -228,8 +265,15 @@ Interactive docs are served at `/docs`. Authenticated routes expect `Authorizati
 | `GET` `POST` | `/simulations` | List or create simulations |
 | `PATCH` `DELETE` | `/simulations/{id}` | Update or delete a simulation |
 | `GET` | `/analytics/strategies` | Strategy catalogue |
-| `POST` | `/analytics/train` | Backtest a strategy: `{symbol, strategyId, ...parameters, slippageBps?}` |
-| `POST` | `/analytics/walk-forward` | Walk-forward test: `{symbol, strategyId, slippageBps?}` |
+| `POST` | `/analytics/train` | Backtest a strategy: `{symbol, strategyId, ...parameters, slippageBps?, execution?, sizing?, allowShort?, riskFreeRate?}` |
+| `POST` | `/analytics/walk-forward` | Walk-forward test: `{symbol, strategyId, slippageBps?, execution?, allowShort?}` |
+| `POST` | `/analytics/robustness` | Monte Carlo, parameter sensitivity, deflated Sharpe and PBO for a backtest (same body as `/analytics/train`) |
+| `POST` | `/analytics/basket` | Portfolio backtest: `{symbols, strategyId, parameters?, rules?, weighting, rebalance, topN}` |
+| `POST` | `/strategies/pine` | Export Strategy Builder rules as TradingView Pine Script |
+| `GET` `PUT` | `/alerts/settings` | Email / Telegram alert preferences |
+| `GET` | `/alerts/signals` | Today's signal for each active simulation |
+| `POST` | `/alerts/test` | Send a test alert |
+| `GET` `POST` | `/cron/daily` | Daily signal job; requires `Authorization: Bearer $CRON_SECRET` |
 | `POST` | `/analytics/predict` | Today's signal from the last trained strategy |
 | `GET` | `/analytics/overview`, `/analytics/sparkline` | Dashboard data |
 | `GET` | `/portfolio` | Every simulation valued today, totals, daily history and allocation |
@@ -244,8 +288,12 @@ Example backtest request:
 ```
 
 Strategy parameters: `sma-crossover` uses `shortWindow` and `longWindow`, `mean-reversion` uses `lookback` and
-`deviation`, `trend-follow` uses `channel`, `ml-logistic` uses `threshold` (probability of a rise needed to buy)
-and `trainWindow` (days of history each model is fitted on), and `buy-hold` has none. A `custom` strategy sends `rules` instead:
+`deviation`, `trend-follow` uses `channel`, `regime-switch` uses `erWindow` and `erThreshold` (efficiency ratio above
+which the market counts as trending), `ml-logistic` uses `threshold` (probability of a rise needed to buy),
+`trainWindow` (days of history each model is fitted on), `horizon` (days ahead, default 1) and `modelType`
+(0 = logistic regression, 1 = boosted trees), and `buy-hold` has none. Trading options: `execution`
+(`next_open` or `close`), `sizing` (`full`, `fixed` with `sizeFraction`, or `vol-target` with `targetVol` and
+`maxLeverage`), `allowShort` and `borrowBps`. A `custom` strategy sends `rules` instead:
 
 ```json
 {
@@ -259,15 +307,36 @@ and `trainWindow` (days of history each model is fitted on), and `buy-hold` has 
 }
 ```
 
-Operands are `price`, `sma`, `ema`, `rsi` (with a `period`) or a fixed `value`; comparisons are `>`, `<`,
-`crosses_above` and `crosses_below`. The strategy buys when **all** entry rules hold and sells when **any** exit
-rule holds or the stop-loss / take-profit is hit.
+Operands are `price`, `sma`, `ema`, `rsi`, `atr`, `roc`, `highest`, `lowest`, `volume_sma` (with a `period`),
+`macd`, `macd_signal`, `macd_hist`, `volume`, or a fixed `value`; comparisons are `>`, `<`, `crosses_above` and
+`crosses_below`. The strategy enters when **all** entry rules hold (or **any**, with `"entryMode": "any"`), and
+exits when **any** exit rule holds or the `stopLoss`, `takeProfit`, `trailingStop` or `maxHoldDays` limit is hit.
+`"side": "short"` makes the rules sell short instead of buying.
+
+### Daily alerts
+
+On Vercel, set `CRON_SECRET` and the cron in [`vercel.json`](vercel.json) calls `/api/cron/daily` after the US close
+on weekdays. Elsewhere, set the repository secret `CRON_SECRET` and variable `APP_URL` (the API's base URL) and
+[`daily-signals.yml`](.github/workflows/daily-signals.yml) calls it instead. Configure `SMTP_*` and/or
+`TELEGRAM_BOT_TOKEN` so the job can send messages; users choose their channels on the Portfolio page.
+
+### Known limitations
+
+- **Survivorship bias**: backtests can only use stocks that still trade today, so baskets of today's leaders look
+  better in hindsight than any basket you could have picked at the time.
+- Daily bars only: a stop is assumed to fill exactly at its level unless the open gaps through it, and when a day
+  touches both a stop and a target the stop is assumed to come first.
+- Prices come from Yahoo Finance's unofficial API (with Stooq as a fallback for US daily history) and are adjusted
+  for splits and dividends.
+- Fractional positions are rebalanced back to their target weight daily (without cost) within a trade; volatility
+  targeting only trades when the target size moves by more than 10 percentage points.
 
 ## Testing
 
 ```bash
-pytest backend              # backend: backtester, risk metrics, ML (including no-look-ahead checks), walk-forward,
-                            # copilot tools, analyst, and every API route against both stores
+pytest backend              # backend: backtester (property tests and a golden snapshot), next-open fills, stops,
+                            # sizing, shorting, costs, risk metrics, ML (no-look-ahead checks), walk-forward,
+                            # robustness, baskets, FX, alerts, copilot tools, and every API route against both stores
 ruff check backend api && ruff format --check backend api
 npm test                    # frontend: API client, strategy lab, research panels, copilot cards (Vitest)
 npm run check               # TypeScript

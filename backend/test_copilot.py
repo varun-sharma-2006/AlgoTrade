@@ -48,6 +48,7 @@ def test_compare_and_walk_forward_tools(market):
         "sma-crossover",
         "mean-reversion",
         "trend-follow",
+        "regime-switch",
         "ml-logistic",
         "buy-hold",
     }
@@ -69,7 +70,12 @@ def test_create_simulation_tool_validates_and_runs_once(market):
     args = {"symbol": "NVDA", "strategy": "ml-logistic", "startingCapital": 5000, "startDate": month_ago}
     assert box.call("create_simulation", args)["created"] is True
     box.call("create_simulation", args)
-    assert len(created) == 1 and created[0].parameters == {"threshold": 0.52, "trainWindow": 504}
+    assert len(created) == 1 and created[0].parameters == {
+        "threshold": 0.52,
+        "trainWindow": 504,
+        "horizon": 1,
+        "modelType": 0,
+    }
     too_old = args | {"startDate": "2000-01-01"}
     assert "at most one year" in box.call("create_simulation", too_old)["error"]
     assert "error" in copilot.Toolbox().call("create_simulation", args)  # no store available

@@ -10,6 +10,8 @@ import type {
   User,
   WalkForwardPayload,
   WalkForwardResult,
+  RobustnessPayload,
+  RobustnessResult,
 } from "../types";
 import { SimulationForm } from "./SimulationForm";
 import { SimulationList } from "./SimulationList";
@@ -27,6 +29,7 @@ interface DashboardProps {
   onTrainStrategy: (payload: TrainingPayload) => Promise<void> | void;
   onPredictStrategy: (symbol: string) => Promise<void> | void;
   onWalkForward?: (payload: WalkForwardPayload) => Promise<WalkForwardResult>;
+  onRobustness?: (payload: RobustnessPayload) => Promise<RobustnessResult>;
   recentTraining: TrainingResult | null;
   recentPrediction: PredictionResult | null;
   onLogout: () => void;
@@ -46,6 +49,7 @@ export function Dashboard({
   onTrainStrategy,
   onPredictStrategy,
   onWalkForward,
+  onRobustness,
   recentTraining,
   recentPrediction,
   onLogout,
@@ -72,6 +76,7 @@ export function Dashboard({
           onTrain={onTrainStrategy}
           onPredict={onPredictStrategy}
           onWalkForward={onWalkForward}
+          onRobustness={onRobustness}
           training={recentTraining}
           prediction={recentPrediction}
           loading={loading}

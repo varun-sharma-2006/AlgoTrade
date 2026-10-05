@@ -14,7 +14,7 @@ from fastapi.responses import FileResponse
 from backend import stores
 from backend.config import settings
 from backend.deps import get_current_user, get_db
-from backend.routes import admin, analytics, auth, chat, market, portfolio, simulations
+from backend.routes import admin, alerts, analytics, auth, chat, market, portfolio, simulations
 from backend.stores import InMemoryStore, MongoStore, now
 
 __all__ = ["app", "get_current_user", "get_db", "MongoStore", "InMemoryStore", "now"]
@@ -37,7 +37,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-for module in (auth, admin, market, simulations, analytics, portfolio, chat):
+for module in (auth, admin, market, simulations, analytics, portfolio, alerts, chat):
     app.include_router(module.router)
 
 

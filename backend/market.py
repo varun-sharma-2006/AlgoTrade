@@ -1,15 +1,19 @@
-"""Market data from Yahoo Finance's public chart API, with offline fallbacks for local development.
+"""Market data from Yahoo Finance's public chart API, with Stooq as a fallback for daily history and offline
+fallbacks for local development.
 
 Talking to the JSON endpoints directly (instead of through yfinance) keeps pandas/numpy out of the
-dependency tree, which makes installs and serverless cold starts much lighter.
+dependency tree, which makes installs and serverless cold starts much lighter. Daily history is cached in
+memory for a few minutes, since one backtest page can ask for the same symbol several times.
 """
 
 from __future__ import annotations
 
+import csv
+import io
 import time
 from collections.abc import Sequence
 from concurrent.futures import ThreadPoolExecutor
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 from urllib.parse import quote
 
@@ -34,6 +38,10 @@ OFFLINE_QUOTES: dict[str, dict[str, Any]] = {
 
 _CLOSE_CACHE_SECONDS = 600
 _close_cache: dict[str, tuple[float, list[float]]] = {}
+_HISTORY_CACHE_SECONDS = 600
+_history_cache: dict[tuple[str, str], tuple[float, dict[str, Any]]] = {}
+STOOQ = "https://stooq.com/q/d/l/"
+STOOQ_INDICES = {"^GSPC": "^spx", "^DJI": "^dji", "^IXIC": "^ndq", "^NDX": "^ndx"}
 
 
 class MarketDataError(Exception):
@@ -139,12 +147,115 @@ def fetch_quotes(symbols: list[str]) -> list[dict[str, Any]]:
     return collected
 
 
-def fetch_chart(symbol: str, range_value: str = "1mo", interval: str = "1d") -> dict[str, Any]:
+def _range_days(range_value: str) -> int:
+    from backend.strategies import period_days
+
+    return period_days(range_value)
+
+
+def stooq_symbol(symbol: str) -> str | None:
+    """Stooq's name for a symbol: US listings get ".us"; other exchanges aren't mapped."""
+    upper = symbol.upper()
+    if upper in STOOQ_INDICES:
+        return STOOQ_INDICES[upper]
+    if upper.isalpha() or (upper.replace("-", "").isalpha() and "-" in upper):
+        return f"{upper.lower().replace('-', '.')}.us"
+    return None
+
+
+def stooq_chart(symbol: str, range_value: str) -> dict[str, Any]:
+    """Daily OHLCV from Stooq's CSV download, trimmed to `range_value`."""
+    code = stooq_symbol(symbol)
+    if not code:
+        raise MarketDataError("no Stooq mapping")
     try:
-        return yahoo_chart(symbol, range_value, interval)
+        response = requests.get(STOOQ, params={"s": code, "i": "d"}, headers=yahoo_headers(), timeout=10)
+    except requests.RequestException as exc:
+        raise MarketDataError(str(exc)) from exc
+    if not response.ok or not response.text.startswith("Date"):
+        raise MarketDataError(f"Stooq HTTP {response.status_code}")
+    cutoff = (datetime.now(UTC) - timedelta(days=_range_days(range_value))).date().isoformat()
+    points = []
+    for row in csv.DictReader(io.StringIO(response.text)):
+        try:
+            if row["Date"] < cutoff:
+                continue
+            points.append(
+                {
+                    "timestamp": f"{row['Date']}T00:00:00+00:00",
+                    "open": float(row["Open"]),
+                    "high": float(row["High"]),
+                    "low": float(row["Low"]),
+                    "close": float(row["Close"]),
+                    "volume": int(float(row["Volume"])) if row.get("Volume") else None,
+                }
+            )
+        except (KeyError, ValueError):
+            continue
+    if not points:
+        raise MarketDataError("Stooq returned no rows")
+    return {
+        "symbol": symbol.upper(),
+        "points": points,
+        "timezone": "UTC",
+        "currency": "USD",
+        "range": range_value,
+        "interval": "1d",
+        "previousClose": points[0]["close"],
+        "regularMarketPrice": points[-1]["close"],
+        "source": "stooq",
+    }
+
+
+def fetch_chart(symbol: str, range_value: str = "1mo", interval: str = "1d") -> dict[str, Any]:
+    daily_history = interval == "1d" and _range_days(range_value) >= 365
+    key = (symbol.upper(), range_value)
+    if daily_history:
+        cached = _history_cache.get(key)
+        if cached and time.time() - cached[0] < _HISTORY_CACHE_SECONDS:
+            return cached[1]
+    try:
+        chart = yahoo_chart(symbol, range_value, interval)
     except MarketDataError as exc:
-        logger.error("Chart fetch failed for %s: %s", symbol, exc)
-        raise HTTPException(status_code=502, detail=f"No market data for {symbol.upper()}") from exc
+        chart = None
+        if interval == "1d":
+            try:
+                chart = stooq_chart(symbol, range_value)
+                logger.warning("Yahoo failed for %s (%s); using Stooq", symbol, exc)
+            except MarketDataError as fallback_exc:
+                logger.error("Chart fetch failed for %s: %s; Stooq: %s", symbol, exc, fallback_exc)
+        else:
+            logger.error("Chart fetch failed for %s: %s", symbol, exc)
+        if chart is None:
+            raise HTTPException(status_code=502, detail=f"No market data for {symbol.upper()}") from exc
+    if daily_history:
+        if len(_history_cache) > 64:
+            _history_cache.clear()
+        _history_cache[key] = (time.time(), chart)
+    return chart
+
+
+def fx_symbol(currency: str, base: str) -> tuple[str, float]:
+    """Yahoo FX ticker for converting `currency` into `base`, and a unit factor (prices quoted in pence)."""
+    factor = 1.0
+    if currency in {"GBp", "GBX"}:
+        currency, factor = "GBP", 0.01
+    elif currency == "ZAc":
+        currency, factor = "ZAR", 0.01
+    elif currency == "ILA":
+        currency, factor = "ILS", 0.01
+    return f"{currency.upper()}{base.upper()}=X", factor
+
+
+def fx_rates(currency: str | None, base: str, range_value: str) -> dict[str, float] | None:
+    """Daily rate of one unit of `currency` in `base` currency, by date, or None if unavailable."""
+    if not currency:
+        return None
+    ticker, factor = fx_symbol(currency, base)
+    if ticker[:3] == base.upper():  # same currency; only a unit change such as pence -> pounds
+        return None if factor == 1.0 else {"*": factor}
+    chart = fetch_chart(ticker, range_value=range_value, interval="1d")
+    return {point["timestamp"][:10]: point["close"] * factor for point in chart["points"]}
 
 
 def search_symbols(query: str) -> list[dict[str, Any]]:

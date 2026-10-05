@@ -93,6 +93,14 @@ export const BuilderIcon = (p: IconProps) => (
   </Icon>
 );
 
+export const LabIcon = (p: IconProps) => (
+  <Icon {...p}>
+    <rect x="3.5" y="12" width="4" height="8" rx="1" />
+    <rect x="10" y="7" width="4" height="13" rx="1" />
+    <rect x="16.5" y="4" width="4" height="16" rx="1" />
+  </Icon>
+);
+
 export const VisitorsIcon = (p: IconProps) => (
   <Icon {...p}>
     <circle cx="9" cy="8" r="3.5" />
